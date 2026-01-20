@@ -167,18 +167,89 @@ export class XClient {
       params.set("start_time", options.startTime);
     }
 
-    const response = await fetch(`${this.baseUrl}/tweets/search/recent?${params}`, {
-      headers: {
-        Authorization: `Bearer ${this.config.bearerToken}`,
-      },
-    });
+    const url = `${this.baseUrl}/tweets/search/recent?${params}`;
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`X API search error: ${response.status} - ${error}`);
+    // Try Bearer Token first
+    if (this.config.bearerToken) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${this.config.bearerToken}`,
+          },
+        });
+
+        if (response.ok) {
+          return await response.json();
+        }
+
+        // If Bearer fails with 401, try OAuth 1.0a
+        if (response.status === 401) {
+          const errorText = await response.text();
+          console.log("[X searchRecentTweets] Bearer token failed (401), trying OAuth 1.0a");
+          
+          // Fall through to OAuth 1.0a
+        } else {
+          const errorText = await response.text();
+          let errorMessage = errorText;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.detail || errorJson.title || errorJson.errors?.[0]?.message || errorText;
+          } catch {
+            // Keep original error text
+          }
+          throw new Error(`X API search error (${response.status}): ${errorMessage}`);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("X API search error")) {
+          throw error;
+        }
+        // Fall through to OAuth 1.0a
+        console.log("[X searchRecentTweets] Bearer token request failed, trying OAuth 1.0a");
+      }
     }
 
-    return response.json();
+    // Try OAuth 1.0a as fallback
+    if (!this.config.oauth1?.consumerKey || 
+        !this.config.oauth1?.consumerSecret ||
+        !this.config.oauth1?.accessToken ||
+        !this.config.oauth1?.accessTokenSecret) {
+      throw new Error("X API認証エラー: Bearer Tokenが無効です。X_BEARER_TOKENを確認するか、OAuth 1.0a認証情報（X_OAUTH1_CONSUMER_KEY, X_OAUTH1_CONSUMER_SECRET, X_OAUTH1_ACCESS_TOKEN, X_OAUTH1_ACCESS_TOKEN_SECRET）を設定してください。");
+    }
+
+    try {
+      // Note: OAuth 1.0a for search endpoint may not work, but we try anyway
+      const authHeader = this.generateOAuth1Header("GET", `${this.baseUrl}/tweets/search/recent`, {});
+      
+      const response = await fetch(url, {
+        headers: {
+          Authorization: authHeader,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        let errorMessage = errorData;
+        try {
+          const errorJson = JSON.parse(errorData);
+          errorMessage = errorJson.detail || errorJson.title || errorJson.errors?.[0]?.message || errorData;
+        } catch {
+          // Keep original error text
+        }
+        
+        if (response.status === 401) {
+          throw new Error(`X API認証エラー (401): ${errorMessage}。Bearer TokenまたはOAuth 1.0a認証情報を確認してください。X Developer Portalでアプリの権限を確認し、Bearer Tokenを再生成してください。`);
+        }
+        
+        throw new Error(`X API search error (${response.status}): ${errorMessage}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("X API")) {
+        throw error;
+      }
+      throw new Error(`X API search error: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // Get own tweet metrics (for MetricsCollector)

@@ -65,10 +65,18 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errorText = await response.text();
+      let errorMessage = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.error || errorJson.detail || errorJson.title || errorJson.message || errorText;
+      } catch {
+        // Keep original error text
+      }
+      
       return NextResponse.json(
         {
           success: false,
-          error: errorText,
+          error: errorMessage,
           status: response.status,
           duration,
         },

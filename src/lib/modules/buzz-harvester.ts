@@ -190,7 +190,16 @@ export async function harvestBuzzTweets(): Promise<{
       await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      results.errors.push(`Query "${query}": ${errorMessage}`);
+      const shortMessage = errorMessage.length > 100 ? errorMessage.slice(0, 100) + "..." : errorMessage;
+      results.errors.push(`Query "${query}": ${shortMessage}`);
+      
+      // Log error to system events
+      await db.insert(systemEvents).values({
+        eventType: "buzz_harvest_error",
+        severity: "error",
+        message: `Buzz harvest error for query "${query}": ${shortMessage}`,
+        metadata: { query, error: errorMessage },
+      });
     }
   }
 
