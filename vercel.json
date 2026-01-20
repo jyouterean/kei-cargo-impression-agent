@@ -1,0 +1,33 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/buzz_harvest_x",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/pattern_mine",
+      "schedule": "0 6,18 * * *"
+    },
+    {
+      "path": "/api/cron/generate",
+      "schedule": "0 5,11,17,23 * * *"
+    },
+    {
+      "path": "/api/cron/schedule",
+      "schedule": "0 */3 * * *"
+    },
+    {
+      "path": "/api/cron/publish",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/metrics",
+      "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/cron/learn",
+      "schedule": "0 3,15 * * *"
+    }
+  ]
+}
+
