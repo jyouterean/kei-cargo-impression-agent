@@ -220,8 +220,15 @@ export class XClient {
     }
 
     try {
-      // Note: OAuth 1.0a for search endpoint may not work, but we try anyway
-      const authHeader = this.generateOAuth1Header("GET", `${this.baseUrl}/tweets/search/recent`, {});
+      // Note: OAuth 1.0a for search endpoint requires query params in signature
+      // Extract query params from URL for signature
+      const urlObj = new URL(url);
+      const queryParams: Record<string, string> = {};
+      urlObj.searchParams.forEach((value, key) => {
+        queryParams[key] = value;
+      });
+      
+      const authHeader = this.generateOAuth1Header("GET", `${this.baseUrl}/tweets/search/recent`, queryParams);
       
       const response = await fetch(url, {
         headers: {
@@ -239,6 +246,13 @@ export class XClient {
           // Keep original error text
         }
         
+        // Log detailed error for debugging
+        console.error(`[X searchRecentTweets] OAuth 1.0a failed:`, {
+          status: response.status,
+          error: errorMessage,
+          url: url.slice(0, 200), // Truncate URL for logging
+        });
+        
         if (response.status === 401) {
           throw new Error(`X API認証エラー (401): ${errorMessage}。Bearer TokenまたはOAuth 1.0a認証情報を確認してください。X Developer Portalでアプリの権限を確認し、Bearer Tokenを再生成してください。`);
         }
@@ -246,7 +260,9 @@ export class XClient {
         throw new Error(`X API search error (${response.status}): ${errorMessage}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      console.log(`[X searchRecentTweets] OAuth 1.0a success: ${data.data?.length || 0} tweets`);
+      return data;
     } catch (error) {
       if (error instanceof Error && error.message.includes("X API")) {
         throw error;

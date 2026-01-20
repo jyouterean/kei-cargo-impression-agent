@@ -144,14 +144,16 @@ export async function harvestBuzzTweets(): Promise<{
 
       // Log search results
       const resultCount = response.data?.length || 0;
+      console.log(`[BuzzHarvester] Query "${query}": Found ${resultCount} tweets`);
       await db.insert(systemEvents).values({
         eventType: "buzz_harvest_query_result",
         severity: "info",
         message: `Query "${query}": Found ${resultCount} tweets`,
-        metadata: { query, resultCount, hasData: !!response.data },
+        metadata: { query, resultCount, hasData: !!response.data, responseMeta: response.meta },
       });
 
       if (!response.data || response.data.length === 0) {
+        console.log(`[BuzzHarvester] No tweets found for query "${query}", skipping...`);
         continue;
       }
 
@@ -231,18 +233,22 @@ export async function harvestBuzzTweets(): Promise<{
   }
 
   // Log summary before filtering
+  console.log(`[BuzzHarvester] Harvested ${harvested.length} tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`);
   await db.insert(systemEvents).values({
     eventType: "buzz_harvest_summary",
     severity: "info",
     message: `Harvested ${harvested.length} tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`,
-    metadata: { totalHarvested: harvested.length, topK: config.buzzTopKPerDay },
+    metadata: { totalHarvested: harvested.length, topK: config.buzzTopKPerDay, errors: results.errors.length },
   });
 
   // Sort by buzz score and take top K
   harvested.sort((a, b) => b.buzzScore - a.buzzScore);
   const topK = harvested.slice(0, config.buzzTopKPerDay);
+  console.log(`[BuzzHarvester] Top ${topK.length} tweets selected for saving`);
 
   // Insert into database
+  let insertSuccess = 0;
+  let insertFailed = 0;
   for (const tweet of topK) {
     try {
       await db.insert(externalPosts).values({
@@ -264,21 +270,36 @@ export async function harvestBuzzTweets(): Promise<{
         isSpamSuspect: tweet.isSpamSuspect,
       });
       results.collected++;
+      insertSuccess++;
     } catch (error) {
       results.skipped++;
+      insertFailed++;
       // Log insertion errors for debugging
       if (error instanceof Error) {
-        console.error(`Failed to insert tweet ${tweet.externalId}:`, error.message);
+        console.error(`[BuzzHarvester] Failed to insert tweet ${tweet.externalId}:`, error.message);
+        await db.insert(systemEvents).values({
+          eventType: "buzz_harvest_insert_error",
+          severity: "error",
+          message: `Failed to insert tweet ${tweet.externalId}`,
+          metadata: { externalId: tweet.externalId, error: error.message },
+        });
       }
     }
   }
+  
+  console.log(`[BuzzHarvester] Insert complete: ${insertSuccess} succeeded, ${insertFailed} failed`);
 
-  // Log completion
+  // Log completion with full details
+  console.log(`[BuzzHarvester] Completed: ${results.collected} collected, ${results.skipped} skipped, ${results.errors.length} errors`);
+  if (results.errors.length > 0) {
+    console.error(`[BuzzHarvester] Errors:`, results.errors);
+  }
+  
   await db.insert(systemEvents).values({
     eventType: "buzz_harvest_complete",
-    severity: "info",
-    message: `Buzz harvest completed: ${results.collected} collected, ${results.skipped} skipped`,
-    metadata: results,
+    severity: results.errors.length > 0 ? "warn" : "info",
+    message: `Buzz harvest completed: ${results.collected} collected, ${results.skipped} skipped, ${results.errors.length} errors`,
+    metadata: { ...results, insertSuccess, insertFailed },
   });
 
   return results;
@@ -295,4 +316,5 @@ export async function getTopBuzzPosts(limit: number = 50): Promise<typeof extern
   });
   return posts;
 }
+
 
