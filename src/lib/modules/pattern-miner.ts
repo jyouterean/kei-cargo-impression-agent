@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { patterns, externalPosts, systemEvents } from "@/lib/db/schema";
 import { extractPattern } from "@/lib/clients/openai-client";
-import { eq, isNull, and, gte, inArray } from "drizzle-orm";
+import { eq, isNull, and, gte } from "drizzle-orm";
 
 /**
  * Check for text similarity to prevent copying
@@ -120,18 +120,31 @@ export async function getPatternDistribution(days: number = 7): Promise<{
 
   const recentPatterns = await db.query.patterns.findMany({
     where: gte(patterns.extractedAt, cutoff),
-    with: {
-      // Note: This requires setting up relations in schema
-    },
+    orderBy: (patterns, { desc }) => [desc(patterns.extractedAt)],
+    limit: 100,
   });
 
   // Get associated external posts for buzz scores
   const postIds = recentPatterns.map((p) => p.externalPostId);
-  const posts = postIds.length > 0
-    ? await db.query.externalPosts.findMany({
-        where: (posts, { inArray }) => inArray(posts.id, postIds),
-      })
-    : [];
+  let posts: typeof externalPosts.$inferSelect[] = [];
+  
+  if (postIds.length > 0) {
+    // Fetch posts one by one or in batches (drizzle doesn't support inArray in query builder easily)
+    // For now, fetch individually for small sets
+    if (postIds.length <= 50) {
+      for (const postId of postIds) {
+        const post = await db.query.externalPosts.findFirst({
+          where: eq(externalPosts.id, postId),
+        });
+        if (post) posts.push(post);
+      }
+    } else {
+      // For larger sets, fetch all and filter
+      const allPosts = await db.query.externalPosts.findMany({ limit: 1000 });
+      posts = allPosts.filter((p) => postIds.includes(p.id));
+    }
+  }
+  
   const postMap = new Map(posts.map((p) => [p.id, p]));
 
   const formats: Record<string, { count: number; totalBuzz: number }> = {};
