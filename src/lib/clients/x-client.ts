@@ -157,8 +157,11 @@ export class XClient {
     // プランによって利用できない tweet.fields / expansions / user.fields を指定している場合にも発生します。
     // まずは最小限のパラメータだけで安定動作させるため、
     // query / max_results / start_time のみに絞っています。
+    // NOTE:
+    // ご利用中のPost APIプランでは `-is:retweet` など一部の高度な検索オペレーターが使えないため、
+    // クエリは「キーワード + 日本語フィルタ」のみに絞ります。
     const params = new URLSearchParams({
-      query: `${query} lang:ja -is:retweet`,
+      query: `${query} lang:ja`,
       max_results: (options.maxResults || 50).toString(),
     });
 
