@@ -39,7 +39,7 @@ interface ConnectionStatus {
   timestamp: string;
 }
 
-type Tab = "dashboard" | "research" | "analytics" | "triggers";
+type Tab = "dashboard" | "research" | "analytics" | "triggers" | "activity" | "history";
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
@@ -180,6 +180,8 @@ export default function AdminDashboard() {
           <div className="flex gap-1 mt-4 border-t border-gray-200">
             {[
               { id: "dashboard" as Tab, label: "ダッシュボード" },
+              { id: "activity" as Tab, label: "アクティビティ" },
+              { id: "history" as Tab, label: "投稿履歴" },
               { id: "research" as Tab, label: "リサーチ結果" },
               { id: "analytics" as Tab, label: "インプレッション分析" },
               { id: "triggers" as Tab, label: "トリガー制御" },
@@ -212,6 +214,8 @@ export default function AdminDashboard() {
       {/* Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         {activeTab === "dashboard" && <DashboardTab status={status} />}
+        {activeTab === "activity" && <ActivityTab />}
+        {activeTab === "history" && <HistoryTab />}
         {activeTab === "research" && <ResearchTab />}
         {activeTab === "analytics" && <AnalyticsTab />}
         {activeTab === "triggers" && (
@@ -622,6 +626,338 @@ function AnalyticsTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Activity Tab Component
+function ActivityTab() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchActivity = async () => {
+    try {
+      setError(null);
+      const res = await fetch("/api/activity?limit=100");
+      if (!res.ok) throw new Error("データの取得に失敗しました");
+      const d = await res.json();
+      setData(d);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <div className="loading-spinner mx-auto mb-4" />
+        <p className="text-gray-600">読み込み中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data || !data.activities || data.activities.length === 0) {
+    return (
+      <div className="empty-state">
+        <div className="empty-state-icon">📋</div>
+        <p>アクティビティがありません</p>
+      </div>
+    );
+  }
+
+  const getActionIcon = (type: string, action: string) => {
+    if (type === "post") return "📝";
+    if (type === "scheduled") return "⏰";
+    if (type === "harvest") return "🔍";
+    if (type === "system") {
+      if (action.includes("error") || action.includes("エラー")) return "❌";
+      if (action.includes("warn") || action.includes("警告")) return "⚠️";
+      return "ℹ️";
+    }
+    return "📌";
+  };
+
+  const getActionColor = (type: string, status?: string) => {
+    if (type === "post" && status === "published") return "text-green-600";
+    if (type === "scheduled") return "text-blue-600";
+    if (type === "harvest") return "text-purple-600";
+    if (type === "system") {
+      if (status === "error" || status === "critical") return "text-red-600";
+      if (status === "warn") return "text-yellow-600";
+      return "text-gray-600";
+    }
+    return "text-gray-700";
+  };
+
+  const formatTimeAgo = (timestamp: string) => {
+    const now = new Date();
+    const time = new Date(timestamp);
+    const diffMs = now.getTime() - time.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "たった今";
+    if (diffMins < 60) return `${diffMins}分前`;
+    if (diffHours < 24) return `${diffHours}時間前`;
+    if (diffDays < 7) return `${diffDays}日前`;
+    return time.toLocaleString("ja-JP");
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">アクティビティタイムライン</h3>
+          <span className="text-sm text-gray-600">全{data.total || 0}件</span>
+        </div>
+        <div className="space-y-4 max-h-[800px] overflow-y-auto">
+          {data.activities.map((activity: any) => (
+            <div
+              key={activity.id}
+              className="flex items-start gap-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <div className="text-2xl">{getActionIcon(activity.type, activity.action)}</div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`font-semibold ${getActionColor(activity.type, activity.status)}`}>
+                    {activity.action}
+                  </span>
+                  {activity.platform && (
+                    <span className={`badge ${activity.platform === "x" ? "badge-primary" : "badge-info"}`}>
+                      {activity.platform === "x" ? "X" : "Threads"}
+                    </span>
+                  )}
+                  {activity.status && activity.status !== "published" && (
+                    <span className={`badge ${activity.status === "pending" ? "badge-warning" : "badge-danger"}`}>
+                      {activity.status}
+                    </span>
+                  )}
+                </div>
+                {activity.content && (
+                  <p className="text-sm text-gray-700 mb-2 line-clamp-2">{activity.content}</p>
+                )}
+                {activity.metrics && (
+                  <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
+                    {activity.metrics.impressions !== undefined && (
+                      <span>👁️ {activity.metrics.impressions.toLocaleString()}</span>
+                    )}
+                    {activity.metrics.likes !== undefined && (
+                      <span>❤️ {activity.metrics.likes}</span>
+                    )}
+                    {activity.metrics.reposts !== undefined && (
+                      <span>🔄 {activity.metrics.reposts}</span>
+                    )}
+                    {activity.metrics.replies !== undefined && (
+                      <span>💬 {activity.metrics.replies}</span>
+                    )}
+                  </div>
+                )}
+                {activity.metadata && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {activity.metadata.format && (
+                      <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                        フォーマット: {activity.metadata.format}
+                      </span>
+                    )}
+                    {activity.metadata.hookType && (
+                      <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                        フック: {activity.metadata.hookType}
+                      </span>
+                    )}
+                    {activity.metadata.topic && (
+                      <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">
+                        トピック: {activity.metadata.topic}
+                      </span>
+                    )}
+                    {activity.metadata.buzzScore !== undefined && (
+                      <span className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded">
+                        BuzzScore: {activity.metadata.buzzScore.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <p className="text-xs text-gray-500 mt-2">
+                  {formatTimeAgo(activity.timestamp)} · {new Date(activity.timestamp).toLocaleString("ja-JP")}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// History Tab Component
+function HistoryTab() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<string>("all");
+
+  const fetchHistory = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+      const url = platform === "all" ? "/api/posts/history?limit=100" : `/api/posts/history?limit=100&platform=${platform}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("データの取得に失敗しました");
+      const d = await res.json();
+      setData(d);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, [platform]);
+
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <div className="loading-spinner mx-auto mb-4" />
+        <p className="text-gray-600">読み込み中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data || !data.posts || data.posts.length === 0) {
+    return (
+      <div className="empty-state">
+        <div className="empty-state-icon">📊</div>
+        <p>投稿履歴がありません</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">投稿履歴と結果</h3>
+          <div className="flex items-center gap-4">
+            <select
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value)}
+              className="px-3 py-1 bg-white border border-gray-300 rounded text-sm"
+            >
+              <option value="all">すべて</option>
+              <option value="x">X</option>
+              <option value="threads">Threads</option>
+            </select>
+            <span className="text-sm text-gray-600">全{data.total || 0}件</span>
+          </div>
+        </div>
+        <div className="space-y-4">
+          {data.posts.map((post: any) => (
+            <div
+              key={post.id}
+              className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`badge ${post.platform === "x" ? "badge-primary" : "badge-info"}`}>
+                    {post.platform === "x" ? "X" : "Threads"}
+                  </span>
+                  {post.metadata.format && (
+                    <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                      {post.metadata.format}
+                    </span>
+                  )}
+                  {post.metadata.hookType && (
+                    <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                      {post.metadata.hookType}
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs text-gray-500">
+                  {new Date(post.publishedAt).toLocaleString("ja-JP")}
+                </span>
+              </div>
+              <p className="text-sm text-gray-900 mb-3 whitespace-pre-wrap">{post.content}</p>
+              {post.metrics && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-gray-200">
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">インプレッション</p>
+                    <p className="text-lg font-bold text-blue-600">
+                      {post.metrics.impressions?.toLocaleString() || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">いいね</p>
+                    <p className="text-lg font-bold text-red-600">{post.metrics.likes || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">リポスト</p>
+                    <p className="text-lg font-bold text-green-600">{post.metrics.reposts || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">リプライ</p>
+                    <p className="text-lg font-bold text-purple-600">{post.metrics.replies || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-600 mb-1">エンゲージ率</p>
+                    <p className="text-lg font-bold text-orange-600">
+                      {post.metrics.engagementRate ? `${post.metrics.engagementRate.toFixed(2)}%` : "-"}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {post.latestMetric && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <p className="text-xs text-gray-500">
+                    最終更新: {new Date(post.latestMetric.collectedAt).toLocaleString("ja-JP")} 
+                    (投稿後{post.latestMetric.hoursAfterPublish}時間)
+                  </p>
+                </div>
+              )}
+              {post.externalId && (
+                <div className="mt-2">
+                  <a
+                    href={`https://twitter.com/i/web/status/${post.externalId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    投稿を見る →
+                  </a>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
