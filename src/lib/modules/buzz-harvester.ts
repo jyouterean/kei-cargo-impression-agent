@@ -175,17 +175,26 @@ export async function harvestBuzzTweets(): Promise<{
         }
 
         const followersCount = userMap.get(tweet.author_id) || 0;
-        const createdAt = new Date(tweet.created_at);
+        const createdAt = tweet.created_at ? new Date(tweet.created_at) : new Date();
         const isJapanese = isJapaneseText(tweet.text);
         const hasKeyword = hasTargetKeywords(tweet.text);
         const isSpam = detectSpamPatterns(tweet.text);
 
+        // Some plans do not return public_metrics by default.
+        // Guard against missing metrics and default to 0 so we don't crash.
+        const metrics = tweet.public_metrics || {
+          like_count: 0,
+          retweet_count: 0,
+          reply_count: 0,
+          quote_count: 0,
+        };
+
         // Calculate buzz score
         const { buzzScore, velocity } = calculateBuzzScore({
-          likeCount: tweet.public_metrics.like_count,
-          repostCount: tweet.public_metrics.retweet_count,
-          replyCount: tweet.public_metrics.reply_count,
-          quoteCount: tweet.public_metrics.quote_count,
+          likeCount: metrics.like_count ?? 0,
+          repostCount: metrics.retweet_count ?? 0,
+          replyCount: metrics.reply_count ?? 0,
+          quoteCount: metrics.quote_count ?? 0,
           createdAt,
           followersCount,
         });
@@ -196,10 +205,10 @@ export async function harvestBuzzTweets(): Promise<{
           authorId: tweet.author_id,
           authorFollowersCount: followersCount,
           createdAt,
-          likeCount: tweet.public_metrics.like_count,
-          repostCount: tweet.public_metrics.retweet_count,
-          replyCount: tweet.public_metrics.reply_count,
-          quoteCount: tweet.public_metrics.quote_count,
+          likeCount: metrics.like_count ?? 0,
+          repostCount: metrics.retweet_count ?? 0,
+          replyCount: metrics.reply_count ?? 0,
+          quoteCount: metrics.quote_count ?? 0,
           buzzScore,
           velocity,
           isJapanese,
