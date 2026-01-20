@@ -10,7 +10,7 @@ import { config } from "@/lib/config";
 import { isCronEnabled } from "@/lib/utils/cron-check";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300; // 5 minutes for multiple post generation
 
 /**
  * Cron: Generate and schedule posts

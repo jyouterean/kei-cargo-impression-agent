@@ -3,7 +3,7 @@ import { verifyCronAuth, unauthorizedResponse, errorResponse } from "@/lib/utils
 import { config } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // 5 minutes max for manual triggers
+export const maxDuration = 600; // 10 minutes max for manual triggers (especially for generate)
 
 /**
  * POST: Manually trigger a cron job

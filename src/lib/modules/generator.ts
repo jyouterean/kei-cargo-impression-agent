@@ -58,14 +58,21 @@ export async function generateDraft(
     // Get recent posts for context
     const recentPosts = await getRecentPostContents(platform);
 
-    // Generate content
-    const generated = await generatePost({
+    // Generate content with timeout
+    const generatePromise = generatePost({
       platform,
       format: arm.format,
       hookType: arm.hookType,
       topic: arm.topic,
       recentPosts,
     });
+
+    // Add timeout (60 seconds for OpenAI API)
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Content generation timeout (60s)")), 60000);
+    });
+
+    const generated = await Promise.race([generatePromise, timeoutPromise]);
 
     // Run policy checks
     const checks = await runAllChecks(generated.content, platform);
@@ -118,36 +125,65 @@ export async function generateAndSchedule(
   let nextSlot = await getNextScheduleSlot(platform);
 
   for (let i = 0; i < count; i++) {
-    const result = await generateDraft(platform);
+    try {
+      // Log progress
+      await db.insert(systemEvents).values({
+        eventType: "generate_progress",
+        severity: "info",
+        message: `Generating post ${i + 1}/${count} for ${platform}`,
+        metadata: { platform, index: i + 1, total: count },
+      });
 
-    if (!result.success || !result.post) {
+      const result = await generateDraft(platform);
+
+      if (!result.success || !result.post) {
+        results.failed++;
+        if (result.error) results.errors.push(result.error);
+        // Log failure
+        await db.insert(systemEvents).values({
+          eventType: "generate_draft_failed",
+          severity: "warn",
+          message: `Failed to generate draft ${i + 1}/${count}: ${result.error}`,
+          metadata: { platform, index: i + 1, error: result.error },
+        });
+        continue;
+      }
+
+      const { contentHash, minhashSignature } = prepareContentForStorage(result.post.content);
+
+      // Schedule the post
+      await db.insert(scheduledPosts).values({
+        platform,
+        content: result.post.content,
+        scheduledFor: nextSlot,
+        armId: result.post.armId,
+        format: result.post.format,
+        hookType: result.post.hookType,
+        topic: result.post.topic,
+        status: "pending",
+        contentHash,
+      });
+
+      results.scheduled++;
+
+      // Move to next slot
+      nextSlot = addMinutes(nextSlot, config.minGapMinutes + Math.floor(Math.random() * 30));
+
+      // Delay between generations (reduced from 1000ms to 500ms)
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       results.failed++;
-      if (result.error) results.errors.push(result.error);
-      continue;
+      results.errors.push(`Post ${i + 1}: ${errorMessage}`);
+      
+      // Log error
+      await db.insert(systemEvents).values({
+        eventType: "generate_error",
+        severity: "error",
+        message: `Error generating post ${i + 1}/${count}: ${errorMessage}`,
+        metadata: { platform, index: i + 1, error: errorMessage },
+      });
     }
-
-    const { contentHash, minhashSignature } = prepareContentForStorage(result.post.content);
-
-    // Schedule the post
-    await db.insert(scheduledPosts).values({
-      platform,
-      content: result.post.content,
-      scheduledFor: nextSlot,
-      armId: result.post.armId,
-      format: result.post.format,
-      hookType: result.post.hookType,
-      topic: result.post.topic,
-      status: "pending",
-      contentHash,
-    });
-
-    results.scheduled++;
-
-    // Move to next slot
-    nextSlot = addMinutes(nextSlot, config.minGapMinutes + Math.floor(Math.random() * 30));
-
-    // Delay between generations
-    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
   // Log
