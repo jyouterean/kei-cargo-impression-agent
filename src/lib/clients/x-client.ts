@@ -90,9 +90,14 @@ export class XClient {
     params: Record<string, string> = {}
   ): string {
     const oauth = this.config.oauth1!;
+    if (!oauth.consumerKey || !oauth.consumerSecret || !oauth.accessToken || !oauth.accessTokenSecret) {
+      throw new Error("OAuth 1.0a認証情報が不完全です");
+    }
+
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonce = crypto.randomBytes(16).toString("hex");
 
+    // OAuth parameters
     const oauthParams: Record<string, string> = {
       oauth_consumer_key: oauth.consumerKey,
       oauth_nonce: nonce,
@@ -102,33 +107,40 @@ export class XClient {
       oauth_version: "1.0",
     };
 
-    // Combine all params for signature base
-    const allParams = { ...params, ...oauthParams };
-    const sortedParams = Object.keys(allParams)
-      .sort()
+    // Combine query params and OAuth params for signature
+    const allParams: Record<string, string> = { ...params, ...oauthParams };
+    
+    // Sort and encode parameters for signature base string
+    const sortedKeys = Object.keys(allParams).sort();
+    const paramString = sortedKeys
       .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(allParams[key])}`)
       .join("&");
 
+    // Build signature base string (URL should not include query params)
+    const baseUrl = url.split("?")[0]; // Remove query params from URL if present
     const signatureBase = [
       method.toUpperCase(),
-      encodeURIComponent(url),
-      encodeURIComponent(sortedParams),
+      encodeURIComponent(baseUrl),
+      encodeURIComponent(paramString),
     ].join("&");
 
+    // Generate signature
     const signingKey = `${encodeURIComponent(oauth.consumerSecret)}&${encodeURIComponent(oauth.accessTokenSecret)}`;
     const signature = crypto
       .createHmac("sha1", signingKey)
       .update(signatureBase)
       .digest("base64");
 
+    // Add signature to OAuth params
     oauthParams.oauth_signature = signature;
 
-    const headerParams = Object.keys(oauthParams)
-      .sort()
+    // Build Authorization header
+    const headerKeys = Object.keys(oauthParams).sort();
+    const headerString = headerKeys
       .map((key) => `${encodeURIComponent(key)}="${encodeURIComponent(oauthParams[key])}"`)
       .join(", ");
 
-    return `OAuth ${headerParams}`;
+    return `OAuth ${headerString}`;
   }
 
   // Search recent tweets (for BuzzHarvester)

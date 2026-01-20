@@ -33,11 +33,26 @@ export async function GET() {
       status.x.username = me.username;
     } else {
       status.x.error = "認証に失敗しました: ユーザー情報が取得できませんでした";
+      status.x.connected = false;
+      status.x.authenticated = false;
     }
   } catch (error) {
-    status.x.error = error instanceof Error ? error.message : "接続エラー";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    status.x.error = errorMessage;
     status.x.connected = false;
     status.x.authenticated = false;
+    
+    // Log detailed error for debugging
+    console.error("[X Connection Error]", {
+      error: errorMessage,
+      hasBearerToken: !!process.env.X_BEARER_TOKEN,
+      hasOAuth: !!(
+        process.env.X_OAUTH1_CONSUMER_KEY &&
+        process.env.X_OAUTH1_CONSUMER_SECRET &&
+        process.env.X_OAUTH1_ACCESS_TOKEN &&
+        process.env.X_OAUTH1_ACCESS_TOKEN_SECRET
+      ),
+    });
   }
 
   // Check Threads connection
