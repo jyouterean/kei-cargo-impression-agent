@@ -115,6 +115,7 @@ export async function GET(request: NextRequest) {
         content: event.message,
         metadata: {
           severity: event.severity,
+          ...(event.metadata || {}), // Include full metadata for debugging
         },
       });
     }

@@ -829,6 +829,24 @@ function ActivityTab() {
                         BuzzScore: {activity.metadata.buzzScore.toFixed(2)}
                       </span>
                     )}
+                    {/* Show error details for debugging */}
+                    {activity.type === "system" && activity.status === "error" && activity.metadata.error && (
+                      <div className="w-full mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800">
+                        <strong>エラー詳細:</strong> {String(activity.metadata.error).slice(0, 200)}
+                        {activity.metadata.query && (
+                          <div className="mt-1">クエリ: {activity.metadata.query}</div>
+                        )}
+                        {activity.metadata.resultCount !== undefined && (
+                          <div className="mt-1">検索結果: {activity.metadata.resultCount}件</div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show query results for buzz harvest */}
+                    {activity.metadata.query && activity.metadata.resultCount !== undefined && (
+                      <span className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                        クエリ: "{activity.metadata.query}" → {activity.metadata.resultCount}件
+                      </span>
+                    )}
                   </div>
                 )}
                 <p className="text-xs text-gray-500 mt-2">
