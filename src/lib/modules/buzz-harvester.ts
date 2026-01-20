@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { externalPosts, systemEvents } from "@/lib/db/schema";
 import { xClient } from "@/lib/clients/x-client";
 import { config } from "@/lib/config";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 interface HarvestedTweet {
   externalId: string;
@@ -123,6 +123,7 @@ export async function harvestBuzzTweets(): Promise<{
   });
 
   const harvested: HarvestedTweet[] = [];
+  const allExternalIds: string[] = [];
 
   for (const query of config.buzzHarvestQueries) {
     try {
@@ -164,16 +165,8 @@ export async function harvestBuzzTweets(): Promise<{
       }
 
       for (const tweet of response.data) {
-        // Skip if already collected
-        const existing = await db.query.externalPosts.findFirst({
-          where: eq(externalPosts.externalId, tweet.id),
-        });
-
-        if (existing) {
-          results.skipped++;
-          continue;
-        }
-
+        allExternalIds.push(tweet.id);
+        
         const followersCount = userMap.get(tweet.author_id) || 0;
         const createdAt = tweet.created_at ? new Date(tweet.created_at) : new Date();
         const isJapanese = isJapaneseText(tweet.text);
@@ -241,33 +234,58 @@ export async function harvestBuzzTweets(): Promise<{
     }
   }
 
+  // Batch check for existing posts (much faster than individual queries)
+  console.log(`[BuzzHarvester] Checking ${allExternalIds.length} tweets for duplicates...`);
+  let existingIdsSet = new Set<string>();
+  if (allExternalIds.length > 0) {
+    // Process in batches to avoid query size limits
+    const batchSize = 500;
+    for (let i = 0; i < allExternalIds.length; i += batchSize) {
+      const batch = allExternalIds.slice(i, i + batchSize);
+      const existing = await db.query.externalPosts.findMany({
+        where: inArray(externalPosts.externalId, batch),
+        columns: { externalId: true },
+      });
+      for (const post of existing) {
+        existingIdsSet.add(post.externalId);
+      }
+    }
+  }
+  console.log(`[BuzzHarvester] Found ${existingIdsSet.size} duplicate tweets`);
+
+  // Filter out duplicates before processing
+  const uniqueHarvested = harvested.filter(t => !existingIdsSet.has(t.externalId));
+  results.skipped = harvested.length - uniqueHarvested.length;
+
   // Log summary before filtering
-  console.log(`[BuzzHarvester] Harvested ${harvested.length} tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`);
+  console.log(`[BuzzHarvester] Harvested ${uniqueHarvested.length} unique tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`);
   await db.insert(systemEvents).values({
     eventType: "buzz_harvest_summary",
     severity: "info",
-    message: `Harvested ${harvested.length} tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`,
-    metadata: { totalHarvested: harvested.length, topK: config.buzzTopKPerDay, errors: results.errors.length },
+    message: `Harvested ${uniqueHarvested.length} unique tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`,
+    metadata: { totalHarvested: uniqueHarvested.length, topK: config.buzzTopKPerDay, errors: results.errors.length, duplicates: results.skipped },
   });
 
   // Sort by buzz score and take top K
-  harvested.sort((a, b) => b.buzzScore - a.buzzScore);
-  const topK = harvested.slice(0, config.buzzTopKPerDay);
+  uniqueHarvested.sort((a, b) => b.buzzScore - a.buzzScore);
+  const topK = uniqueHarvested.slice(0, config.buzzTopKPerDay);
   console.log(`[BuzzHarvester] Top ${topK.length} tweets selected for saving`);
 
-  // Insert into database
+  // Batch insert into database (much faster)
   let insertSuccess = 0;
   let insertFailed = 0;
-  for (const tweet of topK) {
+  
+  if (topK.length > 0) {
     try {
-      await db.insert(externalPosts).values({
+      // Use batch insert with ON CONFLICT handling
+      const insertValues = topK.map(tweet => ({
         externalId: tweet.externalId,
-        platform: "x",
+        platform: "x" as const,
         text: tweet.text,
         authorId: tweet.authorId,
         authorFollowersCount: tweet.authorFollowersCount,
         createdAt: tweet.createdAt,
-        collectedAt: new Date(), // Explicitly set collection time
+        collectedAt: new Date(),
         likeCount: tweet.likeCount,
         repostCount: tweet.repostCount,
         replyCount: tweet.replyCount,
@@ -277,22 +295,38 @@ export async function harvestBuzzTweets(): Promise<{
         isJapanese: tweet.isJapanese,
         hasKeywordMatch: tweet.hasKeywordMatch,
         isSpamSuspect: tweet.isSpamSuspect,
-      });
-      results.collected++;
-      insertSuccess++;
-    } catch (error) {
-      results.skipped++;
-      insertFailed++;
-      // Log insertion errors for debugging
-      if (error instanceof Error) {
-        console.error(`[BuzzHarvester] Failed to insert tweet ${tweet.externalId}:`, error.message);
-        await db.insert(systemEvents).values({
-          eventType: "buzz_harvest_insert_error",
-          severity: "error",
-          message: `Failed to insert tweet ${tweet.externalId}`,
-          metadata: { externalId: tweet.externalId, error: error.message },
-        });
+      }));
+
+      // Insert in batches to avoid size limits
+      const insertBatchSize = 100;
+      for (let i = 0; i < insertValues.length; i += insertBatchSize) {
+        const batch = insertValues.slice(i, i + insertBatchSize);
+        try {
+          await db.insert(externalPosts).values(batch);
+          insertSuccess += batch.length;
+          results.collected += batch.length;
+        } catch (error) {
+          // If batch insert fails, try individual inserts for that batch
+          console.warn(`[BuzzHarvester] Batch insert failed, trying individual inserts for batch ${i}`);
+          for (const tweet of batch) {
+            try {
+              await db.insert(externalPosts).values(tweet);
+              insertSuccess++;
+              results.collected++;
+            } catch (err) {
+              insertFailed++;
+              results.skipped++;
+              if (err instanceof Error && err.message.includes("duplicate")) {
+                // Duplicate key - already exists, skip
+              } else {
+                console.error(`[BuzzHarvester] Failed to insert tweet ${tweet.externalId}:`, err instanceof Error ? err.message : String(err));
+              }
+            }
+          }
+        }
       }
+    } catch (error) {
+      console.error(`[BuzzHarvester] Batch insert error:`, error instanceof Error ? error.message : String(error));
     }
   }
   

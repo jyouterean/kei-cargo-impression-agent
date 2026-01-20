@@ -10,7 +10,7 @@ import { config } from "@/lib/config";
 import { isCronEnabled } from "@/lib/utils/cron-check";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300; // Increase to 5 minutes to handle large batches
 
 /**
  * Cron: Harvest buzz tweets from X
