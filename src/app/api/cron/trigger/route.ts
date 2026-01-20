@@ -50,15 +50,31 @@ export async function POST(request: NextRequest) {
 
     // Get CRON_SECRET for authentication
     const cronSecret = process.env.CRON_SECRET;
-    const token = cronSecret ? `?token=${encodeURIComponent(cronSecret)}` : "";
+    
+    // Build authentication - use token in query param (for Vercel Cron compatibility)
+    // If no secret is set, allow in development mode
+    let authUrl = fullUrl;
+    if (cronSecret) {
+      authUrl = `${fullUrl}?token=${encodeURIComponent(cronSecret)}`;
+    } else if (process.env.NODE_ENV === "development") {
+      // In development, add a dummy token or use Authorization header
+      authUrl = `${fullUrl}?token=dev`;
+    }
 
     // Trigger the cron job
     const startTime = Date.now();
-    const response = await fetch(`${fullUrl}${token}`, {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+    
+    // Also try Authorization header if we have a secret
+    if (cronSecret) {
+      headers["Authorization"] = `Bearer ${cronSecret}`;
+    }
+    
+    const response = await fetch(authUrl, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
     });
 
     const endTime = Date.now();
