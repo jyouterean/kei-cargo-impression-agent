@@ -230,18 +230,41 @@ export class XClient {
 
   // Get authenticated user info
   async getMe(): Promise<User | null> {
-    // Check if OAuth 1.0a credentials are configured
-    if (!this.config.oauth1?.consumerKey || 
-        !this.config.oauth1?.consumerSecret ||
-        !this.config.oauth1?.accessToken ||
-        !this.config.oauth1?.accessTokenSecret) {
-      throw new Error("X OAuth 1.0a認証情報が設定されていません。X_OAUTH1_CONSUMER_KEY, X_OAUTH1_CONSUMER_SECRET, X_OAUTH1_ACCESS_TOKEN, X_OAUTH1_ACCESS_TOKEN_SECRET を確認してください。");
-    }
-
     const url = `${this.baseUrl}/users/me`;
     const queryParams: Record<string, string> = {
       "user.fields": "public_metrics",
     };
+
+    // Try OAuth 2.0 Bearer Token first (simpler)
+    if (this.config.bearerToken) {
+      try {
+        const params = new URLSearchParams(queryParams);
+        const fullUrl = `${url}?${params}`;
+        
+        const response = await fetch(fullUrl, {
+          headers: {
+            Authorization: `Bearer ${this.config.bearerToken}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          return data.data || null;
+        }
+        // If Bearer fails with 401, fall through to OAuth 1.0a
+      } catch (error) {
+        // Fall through to OAuth 1.0a
+        console.log("[X getMe] Bearer token failed, trying OAuth 1.0a");
+      }
+    }
+
+    // Try OAuth 1.0a
+    if (!this.config.oauth1?.consumerKey || 
+        !this.config.oauth1?.consumerSecret ||
+        !this.config.oauth1?.accessToken ||
+        !this.config.oauth1?.accessTokenSecret) {
+      throw new Error("X認証情報が設定されていません。X_BEARER_TOKEN または OAuth 1.0a認証情報（X_OAUTH1_CONSUMER_KEY, X_OAUTH1_CONSUMER_SECRET, X_OAUTH1_ACCESS_TOKEN, X_OAUTH1_ACCESS_TOKEN_SECRET）を設定してください。");
+    }
 
     try {
       // Generate OAuth header with query parameters included in signature
@@ -271,10 +294,10 @@ export class XClient {
       const data = await response.json();
       return data.data || null;
     } catch (error) {
-      if (error instanceof Error) {
+      if (error instanceof Error && error.message.includes("X API エラー")) {
         throw error;
       }
-      throw new Error(`X認証エラー: ${String(error)}`);
+      throw new Error(`X認証エラー: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
