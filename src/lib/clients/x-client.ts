@@ -172,6 +172,7 @@ export class XClient {
     // Try Bearer Token first
     if (this.config.bearerToken) {
       try {
+        console.log(`[X searchRecentTweets] Trying Bearer Token for query: "${query}"`);
         const response = await fetch(url, {
           headers: {
             Authorization: `Bearer ${this.config.bearerToken}`,
@@ -181,15 +182,20 @@ export class XClient {
         if (response.ok) {
           const data = await response.json();
           // Log search results for debugging
-          console.log(`[X searchRecentTweets] Query: "${query}", Results: ${data.data?.length || 0} tweets`);
+          console.log(`[X searchRecentTweets] Bearer Token success - Query: "${query}", Results: ${data.data?.length || 0} tweets`);
+          if (data.meta) {
+            console.log(`[X searchRecentTweets] Response meta:`, {
+              result_count: data.meta.result_count,
+              next_token: data.meta.next_token ? "present" : "none",
+            });
+          }
           return data;
         }
 
         // If Bearer fails with 401, try OAuth 1.0a
         if (response.status === 401) {
           const errorText = await response.text();
-          console.log("[X searchRecentTweets] Bearer token failed (401), trying OAuth 1.0a");
-          
+          console.error(`[X searchRecentTweets] Bearer token failed (401) for query "${query}":`, errorText.slice(0, 200));
           // Fall through to OAuth 1.0a
         } else {
           const errorText = await response.text();
@@ -200,6 +206,7 @@ export class XClient {
           } catch {
             // Keep original error text
           }
+          console.error(`[X searchRecentTweets] Bearer token failed (${response.status}) for query "${query}":`, errorMessage);
           throw new Error(`X API search error (${response.status}): ${errorMessage}`);
         }
       } catch (error) {
@@ -207,7 +214,7 @@ export class XClient {
           throw error;
         }
         // Fall through to OAuth 1.0a
-        console.log("[X searchRecentTweets] Bearer token request failed, trying OAuth 1.0a");
+        console.log(`[X searchRecentTweets] Bearer token request failed for query "${query}", trying OAuth 1.0a:`, error instanceof Error ? error.message : String(error));
       }
     }
 
