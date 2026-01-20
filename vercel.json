@@ -28,11 +28,6 @@
       "path": "/api/cron/learn",
       "schedule": "0 3,15 * * *"
     }
-  ],
-  "functions": {
-    "api/cron/**/*.ts": {
-      "includeFiles": "**/*"
-    }
-  }
+  ]
 }
 
