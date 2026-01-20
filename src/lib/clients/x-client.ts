@@ -285,8 +285,17 @@ export class XClient {
         try {
           const errorJson = JSON.parse(errorData);
           const errorMessage = errorJson.detail || errorJson.title || errorJson.errors?.[0]?.message || errorData;
+          
+          // Provide helpful error messages for 401
+          if (response.status === 401) {
+            throw new Error(`X API 認証エラー (401): ${errorMessage}。OAuth 1.0a認証情報が正しくないか、Access Tokenが無効です。X Developer Portalでアプリの権限を「Read and Write」に設定し、Access TokenとSecretを再生成してください。`);
+          }
+          
           throw new Error(`X API エラー (${response.status}): ${errorMessage}`);
-        } catch {
+        } catch (parseError) {
+          if (parseError instanceof Error && parseError.message.includes("X API 認証エラー")) {
+            throw parseError;
+          }
           throw new Error(`X API エラー (${response.status}): ${errorData.slice(0, 200)}`);
         }
       }
