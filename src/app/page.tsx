@@ -86,6 +86,13 @@ export default function AdminDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Force refresh when tab changes to ensure fresh data
+  useEffect(() => {
+    if (activeTab === "dashboard" || activeTab === "research" || activeTab === "analytics") {
+      fetchData();
+    }
+  }, [activeTab]);
+
   const toggleKillSwitch = async () => {
     try {
       const res = await fetch("/api/admin/kill-switch", {

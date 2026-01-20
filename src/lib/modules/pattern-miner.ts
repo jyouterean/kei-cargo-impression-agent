@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { patterns, externalPosts, systemEvents } from "@/lib/db/schema";
 import { extractPattern } from "@/lib/clients/openai-client";
-import { eq, isNull, and, gte } from "drizzle-orm";
+import { eq, isNull, and, gte, inArray } from "drizzle-orm";
 
 /**
  * Check for text similarity to prevent copying
@@ -127,9 +127,11 @@ export async function getPatternDistribution(days: number = 7): Promise<{
 
   // Get associated external posts for buzz scores
   const postIds = recentPatterns.map((p) => p.externalPostId);
-  const posts = await db.query.externalPosts.findMany({
-    where: (posts, { inArray }) => inArray(posts.id, postIds),
-  });
+  const posts = postIds.length > 0
+    ? await db.query.externalPosts.findMany({
+        where: (posts, { inArray }) => inArray(posts.id, postIds),
+      })
+    : [];
   const postMap = new Map(posts.map((p) => [p.id, p]));
 
   const formats: Record<string, { count: number; totalBuzz: number }> = {};

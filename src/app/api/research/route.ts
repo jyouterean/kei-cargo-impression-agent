@@ -16,8 +16,8 @@ export async function GET(request: NextRequest) {
 
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    // Get top buzz posts
-    const topBuzzPosts = await db.query.externalPosts.findMany({
+    // Get top buzz posts (if no data in time range, get all recent)
+    let topBuzzPosts = await db.query.externalPosts.findMany({
       where: and(
         gte(externalPosts.collectedAt, cutoff),
         eq(externalPosts.isSpamSuspect, false)
@@ -25,6 +25,15 @@ export async function GET(request: NextRequest) {
       orderBy: desc(externalPosts.buzzScore),
       limit,
     });
+
+    // If no posts in time range, get all recent posts
+    if (topBuzzPosts.length === 0) {
+      topBuzzPosts = await db.query.externalPosts.findMany({
+        where: eq(externalPosts.isSpamSuspect, false),
+        orderBy: desc(externalPosts.buzzScore),
+        limit,
+      });
+    }
 
     // Get patterns with associated posts
     const recentPatterns = await db.query.patterns.findMany({
