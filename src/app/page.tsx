@@ -992,6 +992,7 @@ function TriggersTab({
     message: string;
     duration?: number;
     timestamp: string;
+    data?: any;
   }>>({});
 
   const fetchNextExecutions = async () => {
@@ -1040,14 +1041,26 @@ function TriggersTab({
             : data.error || "実行に失敗しました",
           duration: data.duration,
           timestamp: new Date().toISOString(),
+          data: data.data, // Store full response data for detailed display
         },
       }));
 
-      // Refresh cron config to update lastRun
+      // Refresh data after successful execution
       if (data.success) {
-        setTimeout(() => {
-          window.location.reload();
-        }, 2000);
+        // Refresh cron config and other data
+        setTimeout(async () => {
+          // Refresh cron config
+          try {
+            const cronRes = await fetch("/api/cron-config");
+            if (cronRes.ok) {
+              const cronData = await cronRes.json();
+              // Force parent component to refresh
+              window.location.reload();
+            }
+          } catch (err) {
+            console.error("Failed to refresh cron config:", err);
+          }
+        }, 1500);
       }
     } catch (error) {
       setTriggerResults((prev) => ({
@@ -1181,8 +1194,17 @@ function TriggersTab({
                         ? "bg-green-50 text-green-700 border border-green-200"
                         : "bg-red-50 text-red-700 border border-red-200"
                     }`}>
-                      {result.message}
+                      {result.message || (result.success ? "実行完了" : "実行失敗")}
                       {result.duration && ` (${result.duration}ms)`}
+                      {result.data && result.data.data && (
+                        <div className="mt-1 text-xs">
+                          {result.data.data.collected !== undefined && `収集: ${result.data.data.collected}件`}
+                          {result.data.data.extracted !== undefined && `抽出: ${result.data.data.extracted}件`}
+                          {result.data.data.generated !== undefined && `生成: ${result.data.data.generated}件`}
+                          {result.data.data.published !== undefined && `公開: ${result.data.data.published}件`}
+                          {result.data.data.skipped && ` (スキップ: ${result.data.data.reason || "不明"})`}
+                        </div>
+                      )}
                       <span className="text-gray-500 ml-2">
                         {new Date(result.timestamp).toLocaleTimeString("ja-JP")}
                       </span>
