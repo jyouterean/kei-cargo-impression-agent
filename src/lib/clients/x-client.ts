@@ -218,25 +218,52 @@ export class XClient {
 
   // Get authenticated user info
   async getMe(): Promise<User | null> {
-    const url = `${this.baseUrl}/users/me`;
-    const params = new URLSearchParams({
-      "user.fields": "public_metrics",
-    });
-
-    const authHeader = this.generateOAuth1Header("GET", url);
-
-    const response = await fetch(`${url}?${params}`, {
-      headers: {
-        Authorization: authHeader,
-      },
-    });
-
-    if (!response.ok) {
-      return null;
+    // Check if OAuth 1.0a credentials are configured
+    if (!this.config.oauth1?.consumerKey || 
+        !this.config.oauth1?.consumerSecret ||
+        !this.config.oauth1?.accessToken ||
+        !this.config.oauth1?.accessTokenSecret) {
+      throw new Error("X OAuth 1.0a認証情報が設定されていません。X_OAUTH1_CONSUMER_KEY, X_OAUTH1_CONSUMER_SECRET, X_OAUTH1_ACCESS_TOKEN, X_OAUTH1_ACCESS_TOKEN_SECRET を確認してください。");
     }
 
-    const data = await response.json();
-    return data.data || null;
+    const url = `${this.baseUrl}/users/me`;
+    const queryParams: Record<string, string> = {
+      "user.fields": "public_metrics",
+    };
+
+    try {
+      // Generate OAuth header with query parameters included in signature
+      const authHeader = this.generateOAuth1Header("GET", url, queryParams);
+
+      // Build URL with query params
+      const params = new URLSearchParams(queryParams);
+      const fullUrl = `${url}?${params}`;
+
+      const response = await fetch(fullUrl, {
+        headers: {
+          Authorization: authHeader,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        try {
+          const errorJson = JSON.parse(errorData);
+          const errorMessage = errorJson.detail || errorJson.title || errorJson.errors?.[0]?.message || errorData;
+          throw new Error(`X API エラー (${response.status}): ${errorMessage}`);
+        } catch {
+          throw new Error(`X API エラー (${response.status}): ${errorData.slice(0, 200)}`);
+        }
+      }
+
+      const data = await response.json();
+      return data.data || null;
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`X認証エラー: ${String(error)}`);
+    }
   }
 
   // Get rate limit status

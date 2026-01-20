@@ -32,10 +32,12 @@ export async function GET() {
       status.x.authenticated = true;
       status.x.username = me.username;
     } else {
-      status.x.error = "認証に失敗しました";
+      status.x.error = "認証に失敗しました: ユーザー情報が取得できませんでした";
     }
   } catch (error) {
     status.x.error = error instanceof Error ? error.message : "接続エラー";
+    status.x.connected = false;
+    status.x.authenticated = false;
   }
 
   // Check Threads connection
