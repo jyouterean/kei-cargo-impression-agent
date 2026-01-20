@@ -7,7 +7,15 @@ export function verifyCronAuth(request: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   
   if (!cronSecret) {
-    // In development, allow without secret
+    // In development, allow without secret or with "dev" token
+    if (process.env.NODE_ENV === "development") {
+      const url = new URL(request.url);
+      const token = url.searchParams.get("token");
+      // Allow if no token or "dev" token in development
+      if (!token || token === "dev") {
+        return true;
+      }
+    }
     return process.env.NODE_ENV === "development";
   }
 
@@ -21,6 +29,11 @@ export function verifyCronAuth(request: NextRequest): boolean {
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
   if (token === cronSecret) {
+    return true;
+  }
+
+  // In development, allow "dev" token for testing
+  if (process.env.NODE_ENV === "development" && token === "dev") {
     return true;
   }
 
