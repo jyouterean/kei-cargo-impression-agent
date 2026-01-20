@@ -235,7 +235,7 @@ export class XClient {
       "user.fields": "public_metrics",
     };
 
-    // Try OAuth 2.0 Bearer Token first (simpler)
+    // Try OAuth 2.0 Bearer Token first (simpler and more reliable)
     if (this.config.bearerToken) {
       try {
         const params = new URLSearchParams(queryParams);
@@ -249,12 +249,19 @@ export class XClient {
 
         if (response.ok) {
           const data = await response.json();
-          return data.data || null;
+          if (data.data) {
+            return data.data;
+          }
         }
-        // If Bearer fails with 401, fall through to OAuth 1.0a
+        
+        // If Bearer fails with 401, log and try OAuth 1.0a
+        if (response.status === 401) {
+          const errorText = await response.text();
+          console.log("[X getMe] Bearer token failed (401), trying OAuth 1.0a");
+          console.log("[X getMe] Bearer error:", errorText.slice(0, 100));
+        }
       } catch (error) {
-        // Fall through to OAuth 1.0a
-        console.log("[X getMe] Bearer token failed, trying OAuth 1.0a");
+        console.log("[X getMe] Bearer token request failed, trying OAuth 1.0a:", error);
       }
     }
 

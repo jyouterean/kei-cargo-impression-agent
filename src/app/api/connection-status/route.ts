@@ -42,16 +42,22 @@ export async function GET() {
     status.x.connected = false;
     status.x.authenticated = false;
     
-    // Log detailed error for debugging
+    // Log detailed error for debugging (mask sensitive info)
+    const hasBearerToken = !!process.env.X_BEARER_TOKEN;
+    const hasOAuthConsumer = !!(process.env.X_OAUTH1_CONSUMER_KEY && process.env.X_OAUTH1_CONSUMER_SECRET);
+    const hasOAuthToken = !!(process.env.X_OAUTH1_ACCESS_TOKEN && process.env.X_OAUTH1_ACCESS_TOKEN_SECRET);
+    
     console.error("[X Connection Error]", {
       error: errorMessage,
-      hasBearerToken: !!process.env.X_BEARER_TOKEN,
-      hasOAuth: !!(
-        process.env.X_OAUTH1_CONSUMER_KEY &&
-        process.env.X_OAUTH1_CONSUMER_SECRET &&
-        process.env.X_OAUTH1_ACCESS_TOKEN &&
-        process.env.X_OAUTH1_ACCESS_TOKEN_SECRET
-      ),
+      hasBearerToken,
+      hasOAuthConsumer,
+      hasOAuthToken,
+      oauthComplete: hasOAuthConsumer && hasOAuthToken,
+      recommendation: !hasBearerToken && !hasOAuthConsumer 
+        ? "X_BEARER_TOKEN または OAuth 1.0a認証情報を設定してください"
+        : hasOAuthConsumer && !hasOAuthToken
+        ? "X_OAUTH1_ACCESS_TOKEN と X_OAUTH1_ACCESS_TOKEN_SECRET を設定してください"
+        : "X Developer PortalでAccess Tokenを再生成してください",
     });
   }
 
