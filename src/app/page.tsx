@@ -424,7 +424,11 @@ function ResearchTab() {
           <div className="space-y-2">
             {data.patternStats?.formats ? (
               Object.entries(data.patternStats.formats)
-                .sort(([, a], [, b]: any[]) => (b.avgBuzz || 0) - (a.avgBuzz || 0))
+                .sort(([, a], [, b]) => {
+                  const aBuzz = (a as any)?.avgBuzz || 0;
+                  const bBuzz = (b as any)?.avgBuzz || 0;
+                  return bBuzz - aBuzz;
+                })
                 .slice(0, 5)
                 .map(([name, stats]: [string, any]) => (
                   <div key={name} className="flex items-center justify-between">
@@ -445,7 +449,11 @@ function ResearchTab() {
           <div className="space-y-2">
             {data.patternStats?.hookTypes ? (
               Object.entries(data.patternStats.hookTypes)
-                .sort(([, a], [, b]: any[]) => (b.avgBuzz || 0) - (a.avgBuzz || 0))
+                .sort(([, a], [, b]) => {
+                  const aBuzz = (a as any)?.avgBuzz || 0;
+                  const bBuzz = (b as any)?.avgBuzz || 0;
+                  return bBuzz - aBuzz;
+                })
                 .slice(0, 5)
                 .map(([name, stats]: [string, any]) => (
                   <div key={name} className="flex items-center justify-between">
@@ -466,7 +474,11 @@ function ResearchTab() {
           <div className="space-y-2">
             {data.patternStats?.payloadTypes ? (
               Object.entries(data.patternStats.payloadTypes)
-                .sort(([, a], [, b]: any[]) => (b.avgBuzz || 0) - (a.avgBuzz || 0))
+                .sort(([, a], [, b]) => {
+                  const aBuzz = (a as any)?.avgBuzz || 0;
+                  const bBuzz = (b as any)?.avgBuzz || 0;
+                  return bBuzz - aBuzz;
+                })
                 .slice(0, 5)
                 .map(([name, stats]: [string, any]) => (
                   <div key={name} className="flex items-center justify-between">
