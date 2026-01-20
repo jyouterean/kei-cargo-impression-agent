@@ -45,10 +45,10 @@ export async function GET(request: NextRequest) {
         where: eq(externalPosts.id, pattern.externalPostId),
       });
 
-      if (post && post.buzzScore !== null && post.buzzScore !== undefined) {
-        const buzzScore = post.buzzScore;
+      if (post) {
+        const buzzScore = post.buzzScore ?? 0; // null or undefined の場合は0
         
-        if (pattern.format) {
+        if (pattern.format && buzzScore > 0) {
           if (!patternStats.formats[pattern.format]) {
             patternStats.formats[pattern.format] = { count: 0, avgBuzz: 0 };
           }
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
           patternStats.formats[pattern.format].avgBuzz += buzzScore;
         }
 
-        if (pattern.hookType) {
+        if (pattern.hookType && buzzScore > 0) {
           if (!patternStats.hookTypes[pattern.hookType]) {
             patternStats.hookTypes[pattern.hookType] = { count: 0, avgBuzz: 0 };
           }
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
           patternStats.hookTypes[pattern.hookType].avgBuzz += buzzScore;
         }
 
-        if (pattern.payloadType) {
+        if (pattern.payloadType && buzzScore > 0) {
           if (!patternStats.payloadTypes[pattern.payloadType]) {
             patternStats.payloadTypes[pattern.payloadType] = { count: 0, avgBuzz: 0 };
           }
