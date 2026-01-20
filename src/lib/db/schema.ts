@@ -279,6 +279,39 @@ export const rateLimitState = pgTable("rate_limit_state", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// ============================================================
+// Accounts - Multi-account management
+// ============================================================
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: serial("id").primaryKey(),
+    name: varchar("name", { length: 64 }).notNull(), // Account display name
+    platform: varchar("platform", { length: 16 }).notNull(), // "x" or "threads"
+    // X API credentials (OAuth 1.0a)
+    xBearerToken: text("x_bearer_token"),
+    xOAuthConsumerKey: text("x_oauth_consumer_key"),
+    xOAuthConsumerSecret: text("x_oauth_consumer_secret"),
+    xOAuthAccessToken: text("x_oauth_access_token"),
+    xOAuthAccessTokenSecret: text("x_oauth_access_token_secret"),
+    // Threads API credentials
+    threadsAccessToken: text("threads_access_token"),
+    threadsUserId: varchar("threads_user_id", { length: 64 }),
+    // Account settings
+    isActive: boolean("is_active").default(true),
+    maxPostsPerDay: integer("max_posts_per_day").default(40), // Platform-specific limits
+    minGapMinutes: integer("min_gap_minutes").default(20),
+    // Metadata
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at"),
+  },
+  (table) => [
+    index("accounts_platform_idx").on(table.platform),
+    index("accounts_active_idx").on(table.isActive),
+  ]
+);
+
 // Type exports
 export type ExternalPost = typeof externalPosts.$inferSelect;
 export type NewExternalPost = typeof externalPosts.$inferInsert;

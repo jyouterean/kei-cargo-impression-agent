@@ -39,7 +39,7 @@ interface ConnectionStatus {
   timestamp: string;
 }
 
-type Tab = "dashboard" | "research" | "analytics" | "triggers" | "activity" | "history";
+type Tab = "dashboard" | "research" | "analytics" | "triggers" | "activity" | "history" | "accounts";
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
@@ -185,6 +185,7 @@ export default function AdminDashboard() {
               { id: "research" as Tab, label: "リサーチ結果" },
               { id: "analytics" as Tab, label: "インプレッション分析" },
               { id: "triggers" as Tab, label: "トリガー制御" },
+              { id: "accounts" as Tab, label: "アカウント管理" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -221,6 +222,7 @@ export default function AdminDashboard() {
         {activeTab === "triggers" && (
           <TriggersTab cronConfig={cronConfig} onToggle={toggleCron} />
         )}
+        {activeTab === "accounts" && <AccountsTab />}
       </main>
     </div>
   );
@@ -970,6 +972,32 @@ function TriggersTab({
   cronConfig: CronConfig | null;
   onToggle: (name: string, enabled: boolean) => void;
 }) {
+  const [nextExecutions, setNextExecutions] = useState<Record<string, {
+    nextExecution: string;
+    minutesUntilNext: number;
+    label: string;
+    description: string;
+    schedule: string;
+  }> | null>(null);
+
+  const fetchNextExecutions = async () => {
+    try {
+      const res = await fetch("/api/cron/next-execution");
+      if (res.ok) {
+        const data = await res.json();
+        setNextExecutions(data.nextExecutions);
+      }
+    } catch (error) {
+      console.error("Failed to fetch next executions:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchNextExecutions();
+    const interval = setInterval(fetchNextExecutions, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, []);
+
   if (!cronConfig) {
     return (
       <div className="empty-state">
@@ -1017,6 +1045,17 @@ function TriggersTab({
     },
   };
 
+  const formatMinutesUntilNext = (minutes: number) => {
+    if (minutes < 1) return "まもなく";
+    if (minutes < 60) return `${minutes}分後`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours < 24) return `${hours}時間${mins}分後`;
+    const days = Math.floor(hours / 24);
+    const hrs = hours % 24;
+    return `${days}日${hrs}時間後`;
+  };
+
   return (
     <div className="space-y-4">
       <div className="card">
@@ -1028,6 +1067,8 @@ function TriggersTab({
           {Object.entries(cronNames).map(([key, info]) => {
             const config = cronConfig[key];
             if (!config) return null;
+
+            const nextExec = nextExecutions?.[key];
 
             return (
               <div
@@ -1042,10 +1083,20 @@ function TriggersTab({
                     </span>
                   </div>
                   <p className="text-sm text-gray-600 mb-2">{info.description}</p>
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
                     <span>📅 {info.schedule}</span>
                     {config.lastRun && (
                       <span>🕒 最終実行: {new Date(config.lastRun).toLocaleString("ja-JP")}</span>
+                    )}
+                    {nextExec && config.enabled && (
+                      <span className="text-blue-600 font-semibold">
+                        ⏰ 次回実行まで: {formatMinutesUntilNext(nextExec.minutesUntilNext)}
+                      </span>
+                    )}
+                    {nextExec && (
+                      <span className="text-gray-400">
+                        ({new Date(nextExec.nextExecution).toLocaleString("ja-JP")})
+                      </span>
                     )}
                   </div>
                 </div>
@@ -1058,6 +1109,339 @@ function TriggersTab({
               </div>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Accounts Tab Component
+function AccountsTab() {
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const fetchAccounts = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+      const res = await fetch("/api/accounts");
+      if (!res.ok) throw new Error("データの取得に失敗しました");
+      const data = await res.json();
+      setAccounts(data.accounts || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      setAccounts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAccounts();
+  }, []);
+
+  const handleAddAccount = async (formData: FormData) => {
+    try {
+      const res = await fetch("/api/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: formData.get("name"),
+          platform: formData.get("platform"),
+          xBearerToken: formData.get("xBearerToken") || undefined,
+          xOAuthConsumerKey: formData.get("xOAuthConsumerKey") || undefined,
+          xOAuthConsumerSecret: formData.get("xOAuthConsumerSecret") || undefined,
+          xOAuthAccessToken: formData.get("xOAuthAccessToken") || undefined,
+          xOAuthAccessTokenSecret: formData.get("xOAuthAccessTokenSecret") || undefined,
+          threadsAccessToken: formData.get("threadsAccessToken") || undefined,
+          threadsUserId: formData.get("threadsUserId") || undefined,
+          maxPostsPerDay: parseInt(formData.get("maxPostsPerDay") as string) || undefined,
+          minGapMinutes: parseInt(formData.get("minGapMinutes") as string) || undefined,
+          isActive: formData.get("isActive") === "on",
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error?.message || "アカウントの追加に失敗しました");
+      }
+      setShowAddForm(false);
+      await fetchAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+    }
+  };
+
+  const handleDeleteAccount = async (id: number) => {
+    if (!confirm("本当にこのアカウントを削除しますか？")) return;
+
+    try {
+      const res = await fetch(`/api/accounts?id=${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("アカウントの削除に失敗しました");
+      await fetchAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+    }
+  };
+
+  const handleToggleActive = async (account: any) => {
+    try {
+      const res = await fetch("/api/accounts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: account.id,
+          isActive: !account.isActive,
+        }),
+      });
+
+      if (!res.ok) throw new Error("更新に失敗しました");
+      await fetchAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <div className="loading-spinner mx-auto mb-4" />
+        <p className="text-gray-600">読み込み中...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">アカウント管理</h3>
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="btn btn-success"
+          >
+            {showAddForm ? "キャンセル" : "+ アカウント追加"}
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
+          </div>
+        )}
+
+        {showAddForm && (
+          <div className="border border-gray-200 rounded-lg p-6 mb-6 bg-gray-50">
+            <h4 className="font-semibold mb-4 text-gray-900">新しいアカウントを追加</h4>
+            <form action={handleAddAccount} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">アカウント名</label>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                    placeholder="例: 軽貨物アカウント1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">プラットフォーム</label>
+                  <select
+                    name="platform"
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                  >
+                    <option value="x">X</option>
+                    <option value="threads">Threads</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-300 pt-4">
+                <h5 className="font-medium mb-2 text-gray-900">X API認証情報</h5>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Bearer Token</label>
+                    <input
+                      type="password"
+                      name="xBearerToken"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Consumer Key</label>
+                    <input
+                      type="password"
+                      name="xOAuthConsumerKey"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Consumer Secret</label>
+                    <input
+                      type="password"
+                      name="xOAuthConsumerSecret"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Access Token</label>
+                    <input
+                      type="password"
+                      name="xOAuthAccessToken"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Access Token Secret</label>
+                    <input
+                      type="password"
+                      name="xOAuthAccessTokenSecret"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-300 pt-4">
+                <h5 className="font-medium mb-2 text-gray-900">Threads API認証情報</h5>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">Access Token</label>
+                    <input
+                      type="password"
+                      name="threadsAccessToken"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-600 mb-1">User ID</label>
+                    <input
+                      type="text"
+                      name="threadsUserId"
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      placeholder="任意"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 border-t border-gray-300 pt-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">1日の最大投稿数</label>
+                  <input
+                    type="number"
+                    name="maxPostsPerDay"
+                    min="1"
+                    max="100"
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                    placeholder="40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">最小投稿間隔（分）</label>
+                  <input
+                    type="number"
+                    name="minGapMinutes"
+                    min="1"
+                    max="1440"
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                    placeholder="20"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      defaultChecked
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm text-gray-700">アクティブ</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-gray-300">
+                <button
+                  type="button"
+                  onClick={() => setShowAddForm(false)}
+                  className="px-4 py-2 text-sm text-gray-700 bg-gray-200 rounded hover:bg-gray-300"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm text-white bg-blue-600 rounded hover:bg-blue-700"
+                >
+                  追加
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {accounts.length === 0 ? (
+            <div className="empty-state py-8">
+              <p className="text-gray-500">アカウントがありません</p>
+            </div>
+          ) : (
+            accounts.map((account) => (
+              <div
+                key={account.id}
+                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h4 className="font-semibold text-gray-900">{account.name}</h4>
+                    <span className={`badge ${account.platform === "x" ? "badge-primary" : "badge-info"}`}>
+                      {account.platform === "x" ? "X" : "Threads"}
+                    </span>
+                    <span className={`badge ${account.isActive ? "badge-success" : "badge-danger"}`}>
+                      {account.isActive ? "アクティブ" : "無効"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-gray-600">
+                    <span>📊 最大投稿数/日: {account.maxPostsPerDay}</span>
+                    <span>⏱️ 最小間隔: {account.minGapMinutes}分</span>
+                    <span>
+                      {account.hasCredentials.x ? "✅ X認証" : "❌ X未認証"} ·{" "}
+                      {account.hasCredentials.threads ? "✅ Threads認証" : "❌ Threads未認証"}
+                    </span>
+                  </div>
+                  {account.lastUsedAt && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      最終使用: {new Date(account.lastUsedAt).toLocaleString("ja-JP")}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleToggleActive(account)}
+                    className={`btn ${account.isActive ? "btn-danger" : "btn-success"}`}
+                  >
+                    {account.isActive ? "無効化" : "有効化"}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteAccount(account.id)}
+                    className="btn btn-danger"
+                  >
+                    削除
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
