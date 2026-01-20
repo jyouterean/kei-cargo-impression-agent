@@ -114,44 +114,28 @@ export async function harvestBuzzTweets(): Promise<{
     errors: [] as string[],
   };
 
-  // Log start
-  await db.insert(systemEvents).values({
-    eventType: "buzz_harvest_start",
-    severity: "info",
-    message: `Starting buzz harvest with ${config.buzzHarvestQueries.length} queries`,
-    metadata: { queries: config.buzzHarvestQueries },
-  });
+  // Log start (console only for speed, DB insert is slow)
+  console.log(`[BuzzHarvester] Starting harvest with ${config.buzzHarvestQueries.length} queries`);
 
   const harvested: HarvestedTweet[] = [];
   const allExternalIds: string[] = [];
 
   for (const query of config.buzzHarvestQueries) {
     try {
-      // Search with 24 hour lookback (increased from 1 hour)
-      const startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      // Search with 6 hour lookback (reduced from 24 hours to speed up)
+      const startTime = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
       
-      // Log search attempt
-      await db.insert(systemEvents).values({
-        eventType: "buzz_harvest_query_start",
-        severity: "info",
-        message: `Searching for: "${query}"`,
-        metadata: { query, startTime },
-      });
+      // Reduced logging - only log to console, not DB (too slow)
+      console.log(`[BuzzHarvester] Searching for: "${query}"`);
 
       const response = await xClient.searchRecentTweets(query, {
-        maxResults: 100,
+        maxResults: 50, // Reduced from 100 to 50 to speed up
         startTime,
       });
 
-      // Log search results
+      // Log search results (console only for speed)
       const resultCount = response.data?.length || 0;
       console.log(`[BuzzHarvester] Query "${query}": Found ${resultCount} tweets`);
-      await db.insert(systemEvents).values({
-        eventType: "buzz_harvest_query_result",
-        severity: "info",
-        message: `Query "${query}": Found ${resultCount} tweets`,
-        metadata: { query, resultCount, hasData: !!response.data, responseMeta: response.meta },
-      });
 
       if (!response.data || response.data.length === 0) {
         console.log(`[BuzzHarvester] No tweets found for query "${query}", skipping...`);
@@ -210,26 +194,14 @@ export async function harvestBuzzTweets(): Promise<{
         });
       }
 
-      // Rate limit consideration - small delay between queries
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Rate limit consideration - reduced delay for speed
+      await new Promise((resolve) => setTimeout(resolve, 300)); // Reduced from 1000ms to 300ms
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const shortMessage = errorMessage.length > 100 ? errorMessage.slice(0, 100) + "..." : errorMessage;
       results.errors.push(`Query "${query}": ${shortMessage}`);
       
-      // Log error to system events with full details
-      await db.insert(systemEvents).values({
-        eventType: "buzz_harvest_error",
-        severity: "error",
-        message: `Buzz harvest error for query "${query}": ${shortMessage}`,
-        metadata: { 
-          query, 
-          error: errorMessage,
-          errorStack: error instanceof Error ? error.stack : undefined,
-        },
-      });
-      
-      // Also log to console for debugging
+      // Log error to console only (DB insert is too slow, we'll batch log errors at the end)
       console.error(`[BuzzHarvester] Error for query "${query}":`, error);
     }
   }
@@ -257,14 +229,8 @@ export async function harvestBuzzTweets(): Promise<{
   const uniqueHarvested = harvested.filter(t => !existingIdsSet.has(t.externalId));
   results.skipped = harvested.length - uniqueHarvested.length;
 
-  // Log summary before filtering
+  // Log summary before filtering (console only for speed)
   console.log(`[BuzzHarvester] Harvested ${uniqueHarvested.length} unique tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`);
-  await db.insert(systemEvents).values({
-    eventType: "buzz_harvest_summary",
-    severity: "info",
-    message: `Harvested ${uniqueHarvested.length} unique tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`,
-    metadata: { totalHarvested: uniqueHarvested.length, topK: config.buzzTopKPerDay, errors: results.errors.length, duplicates: results.skipped },
-  });
 
   // Sort by buzz score and take top K
   uniqueHarvested.sort((a, b) => b.buzzScore - a.buzzScore);
@@ -338,11 +304,17 @@ export async function harvestBuzzTweets(): Promise<{
     console.error(`[BuzzHarvester] Errors:`, results.errors);
   }
   
+  // Batch log completion to DB (single insert instead of multiple)
   await db.insert(systemEvents).values({
     eventType: "buzz_harvest_complete",
     severity: results.errors.length > 0 ? "warn" : "info",
     message: `Buzz harvest completed: ${results.collected} collected, ${results.skipped} skipped, ${results.errors.length} errors`,
-    metadata: { ...results, insertSuccess, insertFailed },
+    metadata: { 
+      ...results, 
+      insertSuccess, 
+      insertFailed,
+      topK: config.buzzTopKPerDay,
+    },
   });
 
   return results;
