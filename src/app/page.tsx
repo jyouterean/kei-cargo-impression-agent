@@ -326,21 +326,38 @@ function ResearchTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchResearch = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+      const res = await fetch("/api/research?days=7&limit=50");
+      if (!res.ok) throw new Error("データの取得に失敗しました");
+      const d = await res.json();
+      setData(d);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetch("/api/research?days=7&limit=50")
-      .then((res) => {
-        if (!res.ok) throw new Error("データの取得に失敗しました");
-        return res.json();
-      })
-      .then((d) => {
-        setData(d);
-        setError(null);
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "エラーが発生しました");
-        setData(null);
-      })
-      .finally(() => setLoading(false));
+    fetchResearch();
+    // Refresh every 30 seconds when tab is active
+    const interval = setInterval(fetchResearch, 30000);
+    
+    // Listen for buzz harvest completion event
+    const handleBuzzHarvestComplete = () => {
+      setTimeout(fetchResearch, 2000); // Wait 2 seconds for data to be saved
+    };
+    window.addEventListener("buzzHarvestComplete", handleBuzzHarvestComplete);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("buzzHarvestComplete", handleBuzzHarvestComplete);
+    };
   }, []);
 
   if (loading) {
@@ -372,7 +389,17 @@ function ResearchTab() {
   return (
     <div className="space-y-6">
       <div className="card">
-        <h3 className="text-lg font-semibold mb-4 text-gray-900">リサーチサマリー</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">リサーチサマリー</h3>
+          <button
+            onClick={fetchResearch}
+            disabled={loading}
+            className="btn btn-primary text-sm"
+            title="データを更新"
+          >
+            {loading ? "更新中..." : "🔄 更新"}
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-4">
           <div>
             <p className="text-2xl font-bold text-blue-600">

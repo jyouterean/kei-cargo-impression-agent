@@ -217,6 +217,7 @@ export async function harvestBuzzTweets(): Promise<{
         authorId: tweet.authorId,
         authorFollowersCount: tweet.authorFollowersCount,
         createdAt: tweet.createdAt,
+        collectedAt: new Date(), // Explicitly set collection time
         likeCount: tweet.likeCount,
         repostCount: tweet.repostCount,
         replyCount: tweet.replyCount,
@@ -228,8 +229,12 @@ export async function harvestBuzzTweets(): Promise<{
         isSpamSuspect: tweet.isSpamSuspect,
       });
       results.collected++;
-    } catch {
+    } catch (error) {
       results.skipped++;
+      // Log insertion errors for debugging
+      if (error instanceof Error) {
+        console.error(`Failed to insert tweet ${tweet.externalId}:`, error.message);
+      }
     }
   }
 
