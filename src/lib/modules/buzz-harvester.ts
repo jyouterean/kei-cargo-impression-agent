@@ -126,14 +126,34 @@ export async function harvestBuzzTweets(): Promise<{
 
   for (const query of config.buzzHarvestQueries) {
     try {
-      // Search with 1 hour lookback
-      const startTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      // Search with 24 hour lookback (increased from 1 hour)
+      const startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      
+      // Log search attempt
+      await db.insert(systemEvents).values({
+        eventType: "buzz_harvest_query_start",
+        severity: "info",
+        message: `Searching for: "${query}"`,
+        metadata: { query, startTime },
+      });
+
       const response = await xClient.searchRecentTweets(query, {
         maxResults: 100,
         startTime,
       });
 
-      if (!response.data) continue;
+      // Log search results
+      const resultCount = response.data?.length || 0;
+      await db.insert(systemEvents).values({
+        eventType: "buzz_harvest_query_result",
+        severity: "info",
+        message: `Query "${query}": Found ${resultCount} tweets`,
+        metadata: { query, resultCount, hasData: !!response.data },
+      });
+
+      if (!response.data || response.data.length === 0) {
+        continue;
+      }
 
       // Build user lookup map
       const userMap = new Map<string, number>();
@@ -193,15 +213,30 @@ export async function harvestBuzzTweets(): Promise<{
       const shortMessage = errorMessage.length > 100 ? errorMessage.slice(0, 100) + "..." : errorMessage;
       results.errors.push(`Query "${query}": ${shortMessage}`);
       
-      // Log error to system events
+      // Log error to system events with full details
       await db.insert(systemEvents).values({
         eventType: "buzz_harvest_error",
         severity: "error",
         message: `Buzz harvest error for query "${query}": ${shortMessage}`,
-        metadata: { query, error: errorMessage },
+        metadata: { 
+          query, 
+          error: errorMessage,
+          errorStack: error instanceof Error ? error.stack : undefined,
+        },
       });
+      
+      // Also log to console for debugging
+      console.error(`[BuzzHarvester] Error for query "${query}":`, error);
     }
   }
+
+  // Log summary before filtering
+  await db.insert(systemEvents).values({
+    eventType: "buzz_harvest_summary",
+    severity: "info",
+    message: `Harvested ${harvested.length} tweets before filtering (top ${config.buzzTopKPerDay} will be saved)`,
+    metadata: { totalHarvested: harvested.length, topK: config.buzzTopKPerDay },
+  });
 
   // Sort by buzz score and take top K
   harvested.sort((a, b) => b.buzzScore - a.buzzScore);

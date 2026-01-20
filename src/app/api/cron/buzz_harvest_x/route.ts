@@ -32,9 +32,19 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await harvestBuzzTweets();
+    
+    // Log detailed results
+    console.log("[buzz_harvest_x] Result:", {
+      collected: result.collected,
+      skipped: result.skipped,
+      errors: result.errors,
+      errorCount: result.errors.length,
+    });
+    
     return successResponse(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[buzz_harvest_x] Error:", error);
     return errorResponse(message);
   }
 }

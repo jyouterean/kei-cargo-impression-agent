@@ -179,7 +179,10 @@ export class XClient {
         });
 
         if (response.ok) {
-          return await response.json();
+          const data = await response.json();
+          // Log search results for debugging
+          console.log(`[X searchRecentTweets] Query: "${query}", Results: ${data.data?.length || 0} tweets`);
+          return data;
         }
 
         // If Bearer fails with 401, try OAuth 1.0a
