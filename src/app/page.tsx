@@ -23,30 +23,57 @@ interface CronConfig {
   [key: string]: { enabled: boolean; lastRun: string | null };
 }
 
+interface ConnectionStatus {
+  x: {
+    connected: boolean;
+    authenticated: boolean;
+    username: string | null;
+    error: string | null;
+  };
+  threads: {
+    connected: boolean;
+    authenticated: boolean;
+    username: string | null;
+    error: string | null;
+  };
+  timestamp: string;
+}
+
 type Tab = "dashboard" | "research" | "analytics" | "triggers";
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [cronConfig, setCronConfig] = useState<CronConfig | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [killSwitchActive, setKillSwitchActive] = useState(false);
 
   const fetchData = async () => {
     try {
-      const [statusRes, cronRes] = await Promise.all([
-        fetch("/api/status"),
-        fetch("/api/cron-config"),
+      setError(null);
+      const [statusRes, cronRes, connectionRes] = await Promise.all([
+        fetch("/api/status").catch(() => null),
+        fetch("/api/cron-config").catch(() => null),
+        fetch("/api/connection-status").catch(() => null),
       ]);
-      if (statusRes.ok) {
+
+      if (statusRes?.ok) {
         const data = await statusRes.json();
         setStatus(data);
         setKillSwitchActive(data.system?.killSwitch || false);
       }
-      if (cronRes.ok) {
+
+      if (cronRes?.ok) {
         setCronConfig(await cronRes.json());
       }
+
+      if (connectionRes?.ok) {
+        setConnectionStatus(await connectionRes.json());
+      }
     } catch (err) {
+      setError(err instanceof Error ? err.message : "データの取得に失敗しました");
       console.error("Failed to fetch:", err);
     } finally {
       setLoading(false);
@@ -66,7 +93,10 @@ export default function AdminDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active: !killSwitchActive }),
       });
-      if (res.ok) setKillSwitchActive(!killSwitchActive);
+      if (res.ok) {
+        setKillSwitchActive(!killSwitchActive);
+        await fetchData();
+      }
     } catch (err) {
       console.error("Failed to toggle kill switch:", err);
     }
@@ -90,63 +120,94 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)]">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="animate-spin w-12 h-12 border-4 border-[var(--accent-cyan)] border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-[var(--text-muted)]">読み込み中...</p>
+          <div className="loading-spinner mx-auto mb-4" />
+          <p className="text-gray-600">読み込み中...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-3">
-              <span className="text-3xl">🚚</span>
-              <span className="bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] bg-clip-text text-transparent">
-                軽貨物インプレッションエージェント
-              </span>
-            </h1>
-            <p className="text-sm text-[var(--text-muted)] mt-1">管理者ダッシュボード</p>
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">軽貨物インプレッションエージェント</h1>
+              <p className="text-sm text-gray-600 mt-1">管理者ダッシュボード</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="status-indicator">
+                <span className={`status-dot ${killSwitchActive ? "disconnected" : "connected"}`} />
+                <span className="text-sm text-gray-700">
+                  {killSwitchActive ? "停止中" : "稼働中"}
+                </span>
+              </div>
+              <button
+                onClick={toggleKillSwitch}
+                className={`toggle-switch ${killSwitchActive ? "active" : ""}`}
+                title="Kill Switch"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-[var(--text-muted)]">
-              {killSwitchActive ? "🔴 停止中" : "🟢 稼働中"}
-            </span>
-            <button
-              onClick={toggleKillSwitch}
-              className={`kill-switch ${killSwitchActive ? "active" : ""}`}
-              title="Kill Switch"
-            />
-          </div>
-        </div>
 
-        {/* Tabs */}
-        <div className="max-w-7xl mx-auto px-6 flex gap-1 border-t border-[var(--border-color)]">
-          {[
-            { id: "dashboard" as Tab, label: "📊 ダッシュボード", icon: "📊" },
-            { id: "research" as Tab, label: "🔍 リサーチ結果", icon: "🔍" },
-            { id: "analytics" as Tab, label: "📈 インプレッション分析", icon: "📈" },
-            { id: "triggers" as Tab, label: "⚙️ トリガー制御", icon: "⚙️" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === tab.id
-                  ? "text-[var(--accent-cyan)] border-b-2 border-[var(--accent-cyan)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {/* SNS Connection Status */}
+          {connectionStatus && (
+            <div className="flex items-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className={`status-dot ${connectionStatus.x.connected && connectionStatus.x.authenticated ? "connected" : connectionStatus.x.error ? "disconnected" : "unknown"}`} />
+                <span className="text-gray-700">
+                  X: {connectionStatus.x.connected && connectionStatus.x.authenticated
+                    ? `@${connectionStatus.x.username || "接続済み"}`
+                    : connectionStatus.x.error || "未接続"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`status-dot ${connectionStatus.threads.connected && connectionStatus.threads.authenticated ? "connected" : connectionStatus.threads.error ? "disconnected" : "unknown"}`} />
+                <span className="text-gray-700">
+                  Threads: {connectionStatus.threads.connected && connectionStatus.threads.authenticated
+                    ? `@${connectionStatus.threads.username || "接続済み"}`
+                    : connectionStatus.threads.error || "未接続"}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Tabs */}
+          <div className="flex gap-1 mt-4 border-t border-gray-200">
+            {[
+              { id: "dashboard" as Tab, label: "ダッシュボード" },
+              { id: "research" as Tab, label: "リサーチ結果" },
+              { id: "analytics" as Tab, label: "インプレッション分析" },
+              { id: "triggers" as Tab, label: "トリガー制御" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-3 text-sm font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
+
+      {/* Error Message */}
+      {error && (
+        <div className="max-w-7xl mx-auto px-6 pt-4">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            {error}
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
@@ -154,7 +215,7 @@ export default function AdminDashboard() {
         {activeTab === "research" && <ResearchTab />}
         {activeTab === "analytics" && <AnalyticsTab />}
         {activeTab === "triggers" && (
-          <TriggersTab cronConfig={cronConfig} onToggle={(name, enabled) => toggleCron(name, enabled)} />
+          <TriggersTab cronConfig={cronConfig} onToggle={toggleCron} />
         )}
       </main>
     </div>
@@ -163,75 +224,84 @@ export default function AdminDashboard() {
 
 // Dashboard Tab Component
 function DashboardTab({ status }: { status: SystemStatus | null }) {
-  if (!status) return <div>データなし</div>;
+  if (!status) {
+    return (
+      <div className="empty-state">
+        <div className="empty-state-icon">📊</div>
+        <p>データがありません</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="card stat-card-x">
+        <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <span className="badge badge-x">X</span>
-            <span className="text-2xl">𝕏</span>
+            <span className="badge badge-primary">X</span>
           </div>
-          <div className="metric-value">
+          <div className="text-3xl font-bold text-gray-900 mb-1">
             {status.todayStats.x.posted}/{status.todayStats.x.limit}
           </div>
-          <p className="metric-label">本日の投稿</p>
-        </div>
-
-        <div className="card stat-card-threads">
-          <div className="flex items-center justify-between mb-4">
-            <span className="badge badge-threads">Threads</span>
-            <span className="text-2xl">🧵</span>
-          </div>
-          <div className="metric-value">
-            {status.todayStats.threads.posted}/{status.todayStats.threads.limit}
-          </div>
-          <p className="metric-label">本日の投稿</p>
-        </div>
-
-        <div className="card stat-card-success">
-          <div className="flex items-center justify-between mb-4">
-            <span className="badge badge-success">週間平均</span>
-            <span className="text-2xl">👁️</span>
-          </div>
-          <div className="metric-value">
-            {Math.round(status.weekStats.avgImpressions).toLocaleString()}
-          </div>
-          <p className="metric-label">インプレッション</p>
+          <p className="text-sm text-gray-600">本日の投稿</p>
         </div>
 
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <span className="badge badge-info">キュー</span>
-            <span className="text-2xl">📋</span>
+            <span className="badge badge-info">Threads</span>
           </div>
-          <div className="metric-value">{status.queue.pending}</div>
-          <p className="metric-label">予約投稿</p>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            {status.todayStats.threads.posted}/{status.todayStats.threads.limit}
+          </div>
+          <p className="text-sm text-gray-600">本日の投稿</p>
+        </div>
+
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <span className="badge badge-success">週間平均</span>
+          </div>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            {Math.round(status.weekStats.avgImpressions).toLocaleString()}
+          </div>
+          <p className="text-sm text-gray-600">インプレッション</p>
+        </div>
+
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <span className="badge badge-warning">キュー</span>
+          </div>
+          <div className="text-3xl font-bold text-gray-900 mb-1">
+            {status.queue.pending}
+          </div>
+          <p className="text-sm text-gray-600">予約投稿</p>
         </div>
       </div>
 
       {/* Recent Events */}
       <div className="card">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <span>📜</span> 最近のイベント
-        </h3>
-        <div className="space-y-1 max-h-96 overflow-y-auto">
-          {status.recentEvents.map((event, i) => (
-            <div key={i} className="event-item">
-              <div
-                className={`event-dot event-dot-${event.severity === "error" ? "error" : event.severity === "warn" ? "warn" : "info"}`}
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm truncate">{event.message}</p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  {event.type} · {new Date(event.time).toLocaleString("ja-JP")}
-                </p>
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">最近のイベント</h3>
+        {status.recentEvents && status.recentEvents.length > 0 ? (
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {status.recentEvents.map((event, i) => (
+              <div key={i} className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
+                <span
+                  className={`status-dot ${event.severity === "error" ? "disconnected" : event.severity === "warn" ? "unknown" : "connected"}`}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-900">{event.message}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {event.type} · {new Date(event.time).toLocaleString("ja-JP")}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state py-8">
+            <p className="text-gray-500">イベントがありません</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -241,49 +311,80 @@ function DashboardTab({ status }: { status: SystemStatus | null }) {
 function ResearchTab() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/research?days=7&limit=50")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("データの取得に失敗しました");
+        return res.json();
+      })
       .then((d) => {
         setData(d);
-        setLoading(false);
+        setError(null);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "エラーが発生しました");
+        setData(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div>読み込み中...</div>;
-  if (!data) return <div>データなし</div>;
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <div className="loading-spinner mx-auto mb-4" />
+        <p className="text-gray-600">読み込み中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data || !data.topBuzzPosts || data.topBuzzPosts.length === 0) {
+    return (
+      <div className="empty-state">
+        <div className="empty-state-icon">🔍</div>
+        <p>リサーチデータがありません</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="card">
-        <h3 className="text-lg font-semibold mb-4">📊 リサーチサマリー</h3>
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">リサーチサマリー</h3>
         <div className="grid grid-cols-3 gap-4">
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-cyan)]">
-              {data.summary.totalCollected}
+            <p className="text-2xl font-bold text-blue-600">
+              {data.summary?.totalCollected || 0}
             </p>
-            <p className="text-sm text-[var(--text-muted)]">収集投稿数</p>
+            <p className="text-sm text-gray-600">収集投稿数</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-purple)]">
-              {data.summary.avgBuzzScore.toFixed(2)}
+            <p className="text-2xl font-bold text-purple-600">
+              {(data.summary?.avgBuzzScore || 0).toFixed(2)}
             </p>
-            <p className="text-sm text-[var(--text-muted)]">平均BuzzScore</p>
+            <p className="text-sm text-gray-600">平均BuzzScore</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-green)]">
-              {data.summary.totalPatterns}
+            <p className="text-2xl font-bold text-green-600">
+              {data.summary?.totalPatterns || 0}
             </p>
-            <p className="text-sm text-[var(--text-muted)]">抽出パターン数</p>
+            <p className="text-sm text-gray-600">抽出パターン数</p>
           </div>
         </div>
       </div>
 
       {/* Top Buzz Posts */}
       <div className="card">
-        <h3 className="text-lg font-semibold mb-4">🔥 トップバズ投稿</h3>
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">トップバズ投稿</h3>
         <div className="table-container">
           <table>
             <thead>
@@ -297,17 +398,17 @@ function ResearchTab() {
             <tbody>
               {data.topBuzzPosts.slice(0, 10).map((post: any) => (
                 <tr key={post.id}>
-                  <td className="max-w-md truncate">{post.text.slice(0, 100)}...</td>
+                  <td className="max-w-md">{post.text?.slice(0, 100) || "-"}...</td>
                   <td>
-                    <span className="text-[var(--accent-orange)] font-semibold">
-                      {post.buzzScore.toFixed(2)}
+                    <span className="font-semibold text-orange-600">
+                      {(post.buzzScore || 0).toFixed(2)}
                     </span>
                   </td>
                   <td>
-                    {post.metrics.likes + post.metrics.reposts + post.metrics.replies}
+                    {((post.metrics?.likes || 0) + (post.metrics?.reposts || 0) + (post.metrics?.replies || 0))}
                   </td>
-                  <td className="text-sm text-[var(--text-muted)]">
-                    {new Date(post.collectedAt).toLocaleString("ja-JP")}
+                  <td className="text-sm text-gray-600">
+                    {post.collectedAt ? new Date(post.collectedAt).toLocaleString("ja-JP") : "-"}
                   </td>
                 </tr>
               ))}
@@ -319,53 +420,65 @@ function ResearchTab() {
       {/* Pattern Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="card">
-          <h4 className="font-semibold mb-4">フォーマット分布</h4>
+          <h4 className="font-semibold mb-4 text-gray-900">フォーマット分布</h4>
           <div className="space-y-2">
-            {Object.entries(data.patternStats.formats)
-              .sort(([, a], [, b]) => (b as any).avgBuzz - (a as any).avgBuzz)
-              .slice(0, 5)
-              .map(([name, stats]: [string, any]) => (
-                <div key={name} className="flex items-center justify-between">
-                  <span className="text-sm">{name}</span>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {stats.count}件 · {stats.avgBuzz.toFixed(2)}
-                  </span>
-                </div>
-              ))}
+            {data.patternStats?.formats ? (
+              Object.entries(data.patternStats.formats)
+                .sort(([, a], [, b]: any[]) => (b.avgBuzz || 0) - (a.avgBuzz || 0))
+                .slice(0, 5)
+                .map(([name, stats]: [string, any]) => (
+                  <div key={name} className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700">{name}</span>
+                    <span className="text-xs text-gray-600">
+                      {stats.count || 0}件 · {(stats.avgBuzz || 0).toFixed(2)}
+                    </span>
+                  </div>
+                ))
+            ) : (
+              <p className="text-sm text-gray-500">データなし</p>
+            )}
           </div>
         </div>
 
         <div className="card">
-          <h4 className="font-semibold mb-4">フックタイプ分布</h4>
+          <h4 className="font-semibold mb-4 text-gray-900">フックタイプ分布</h4>
           <div className="space-y-2">
-            {Object.entries(data.patternStats.hookTypes)
-              .sort(([, a], [, b]) => (b as any).avgBuzz - (a as any).avgBuzz)
-              .slice(0, 5)
-              .map(([name, stats]: [string, any]) => (
-                <div key={name} className="flex items-center justify-between">
-                  <span className="text-sm">{name}</span>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {stats.count}件 · {stats.avgBuzz.toFixed(2)}
-                  </span>
-                </div>
-              ))}
+            {data.patternStats?.hookTypes ? (
+              Object.entries(data.patternStats.hookTypes)
+                .sort(([, a], [, b]: any[]) => (b.avgBuzz || 0) - (a.avgBuzz || 0))
+                .slice(0, 5)
+                .map(([name, stats]: [string, any]) => (
+                  <div key={name} className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700">{name}</span>
+                    <span className="text-xs text-gray-600">
+                      {stats.count || 0}件 · {(stats.avgBuzz || 0).toFixed(2)}
+                    </span>
+                  </div>
+                ))
+            ) : (
+              <p className="text-sm text-gray-500">データなし</p>
+            )}
           </div>
         </div>
 
         <div className="card">
-          <h4 className="font-semibold mb-4">ペイロードタイプ分布</h4>
+          <h4 className="font-semibold mb-4 text-gray-900">ペイロードタイプ分布</h4>
           <div className="space-y-2">
-            {Object.entries(data.patternStats.payloadTypes)
-              .sort(([, a], [, b]) => (b as any).avgBuzz - (a as any).avgBuzz)
-              .slice(0, 5)
-              .map(([name, stats]: [string, any]) => (
-                <div key={name} className="flex items-center justify-between">
-                  <span className="text-sm">{name}</span>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {stats.count}件 · {stats.avgBuzz.toFixed(2)}
-                  </span>
-                </div>
-              ))}
+            {data.patternStats?.payloadTypes ? (
+              Object.entries(data.patternStats.payloadTypes)
+                .sort(([, a], [, b]: any[]) => (b.avgBuzz || 0) - (a.avgBuzz || 0))
+                .slice(0, 5)
+                .map(([name, stats]: [string, any]) => (
+                  <div key={name} className="flex items-center justify-between">
+                    <span className="text-sm text-gray-700">{name}</span>
+                    <span className="text-xs text-gray-600">
+                      {stats.count || 0}件 · {(stats.avgBuzz || 0).toFixed(2)}
+                    </span>
+                  </div>
+                ))
+            ) : (
+              <p className="text-sm text-gray-500">データなし</p>
+            )}
           </div>
         </div>
       </div>
@@ -377,34 +490,62 @@ function ResearchTab() {
 function AnalyticsTab() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(30);
 
   useEffect(() => {
+    setLoading(true);
     fetch(`/api/analytics?days=${days}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("データの取得に失敗しました");
+        return res.json();
+      })
       .then((d) => {
         setData(d);
-        setLoading(false);
+        setError(null);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "エラーが発生しました");
+        setData(null);
+      })
+      .finally(() => setLoading(false));
   }, [days]);
 
-  if (loading) return <div>読み込み中...</div>;
-  if (!data) return <div>データなし</div>;
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <div className="loading-spinner mx-auto mb-4" />
+        <p className="text-gray-600">読み込み中...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+        {error}
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="empty-state">
+        <div className="empty-state-icon">📈</div>
+        <p>分析データがありません</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Summary */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">📊 インプレッション分析</h3>
+          <h3 className="text-lg font-semibold text-gray-900">インプレッション分析</h3>
           <select
             value={days}
-            onChange={(e) => {
-              setDays(Number(e.target.value));
-              setLoading(true);
-            }}
-            className="px-3 py-1 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded text-sm"
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm"
           >
             <option value={7}>過去7日</option>
             <option value={30}>過去30日</option>
@@ -413,146 +554,62 @@ function AnalyticsTab() {
         </div>
         <div className="grid grid-cols-4 gap-4">
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-cyan)]">
-              {data.summary.totalPosts}
-            </p>
-            <p className="text-sm text-[var(--text-muted)]">総投稿数</p>
+            <p className="text-2xl font-bold text-blue-600">{data.summary?.totalPosts || 0}</p>
+            <p className="text-sm text-gray-600">総投稿数</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-purple)]">
-              {Math.round(data.summary.totalImpressions).toLocaleString()}
+            <p className="text-2xl font-bold text-purple-600">
+              {Math.round(data.summary?.totalImpressions || 0).toLocaleString()}
             </p>
-            <p className="text-sm text-[var(--text-muted)]">総インプレッション</p>
+            <p className="text-sm text-gray-600">総インプレッション</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-green)]">
-              {Math.round(data.summary.avgImpressions).toLocaleString()}
+            <p className="text-2xl font-bold text-green-600">
+              {Math.round(data.summary?.avgImpressions || 0).toLocaleString()}
             </p>
-            <p className="text-sm text-[var(--text-muted)]">平均インプレッション</p>
+            <p className="text-sm text-gray-600">平均インプレッション</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-[var(--accent-yellow)]">
-              {Math.round(data.summary.avgEngagement * 10) / 10}
+            <p className="text-2xl font-bold text-yellow-600">
+              {Math.round((data.summary?.avgEngagement || 0) * 10) / 10}
             </p>
-            <p className="text-sm text-[var(--text-muted)]">平均エンゲージメント</p>
+            <p className="text-sm text-gray-600">平均エンゲージメント</p>
           </div>
         </div>
       </div>
 
       {/* Daily Trend */}
-      <div className="card">
-        <h3 className="text-lg font-semibold mb-4">📈 日次トレンド</h3>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>日付</th>
-                <th>投稿数</th>
-                <th>インプレッション</th>
-                <th>エンゲージメント</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.dailyTrend.slice(-14).map((day: any) => (
-                <tr key={day.date}>
-                  <td>{day.date}</td>
-                  <td>{day.posts}</td>
-                  <td className="text-[var(--accent-cyan)]">
-                    {Math.round(day.impressions).toLocaleString()}
-                  </td>
-                  <td className="text-[var(--accent-green)]">
-                    {Math.round(day.engagement * 10) / 10}
-                  </td>
+      {data.dailyTrend && data.dailyTrend.length > 0 && (
+        <div className="card">
+          <h3 className="text-lg font-semibold mb-4 text-gray-900">日次トレンド</h3>
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>日付</th>
+                  <th>投稿数</th>
+                  <th>インプレッション</th>
+                  <th>エンゲージメント</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Performance by Format/Hook/Topic */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card">
-          <h4 className="font-semibold mb-4">フォーマット別パフォーマンス</h4>
-          <div className="space-y-3">
-            {data.performanceByFormat.slice(0, 5).map((item: any) => (
-              <div key={item.name}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{item.name}</span>
-                  <span className="text-xs text-[var(--accent-cyan)]">
-                    {Math.round(item.avgImpressions).toLocaleString()}
-                  </span>
-                </div>
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill progress-fill-blue"
-                    style={{
-                      width: `${Math.min(100, (item.avgImpressions / Math.max(...data.performanceByFormat.map((p: any) => p.avgImpressions))) * 100)}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  {item.count}件投稿
-                </p>
-              </div>
-            ))}
+              </thead>
+              <tbody>
+                {data.dailyTrend.slice(-14).map((day: any) => (
+                  <tr key={day.date}>
+                    <td>{day.date}</td>
+                    <td>{day.posts || 0}</td>
+                    <td className="text-blue-600">
+                      {Math.round(day.impressions || 0).toLocaleString()}
+                    </td>
+                    <td className="text-green-600">
+                      {Math.round((day.engagement || 0) * 10) / 10}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-
-        <div className="card">
-          <h4 className="font-semibold mb-4">フックタイプ別パフォーマンス</h4>
-          <div className="space-y-3">
-            {data.performanceByHook.slice(0, 5).map((item: any) => (
-              <div key={item.name}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{item.name}</span>
-                  <span className="text-xs text-[var(--accent-purple)]">
-                    {Math.round(item.avgImpressions).toLocaleString()}
-                  </span>
-                </div>
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill progress-fill-purple"
-                    style={{
-                      width: `${Math.min(100, (item.avgImpressions / Math.max(...data.performanceByHook.map((p: any) => p.avgImpressions))) * 100)}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  {item.count}件投稿
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card">
-          <h4 className="font-semibold mb-4">トピック別パフォーマンス</h4>
-          <div className="space-y-3">
-            {data.performanceByTopic.slice(0, 5).map((item: any) => (
-              <div key={item.name}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{item.name}</span>
-                  <span className="text-xs text-[var(--accent-green)]">
-                    {Math.round(item.avgImpressions).toLocaleString()}
-                  </span>
-                </div>
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill progress-fill-green"
-                    style={{
-                      width: `${Math.min(100, (item.avgImpressions / Math.max(...data.performanceByTopic.map((p: any) => p.avgImpressions))) * 100)}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  {item.count}件投稿
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -565,7 +622,14 @@ function TriggersTab({
   cronConfig: CronConfig | null;
   onToggle: (name: string, enabled: boolean) => void;
 }) {
-  if (!cronConfig) return <div>読み込み中...</div>;
+  if (!cronConfig) {
+    return (
+      <div className="empty-state">
+        <div className="loading-spinner mx-auto mb-4" />
+        <p className="text-gray-600">読み込み中...</p>
+      </div>
+    );
+  }
 
   const cronNames: Record<string, { label: string; description: string; schedule: string }> = {
     buzz_harvest_x: {
@@ -606,13 +670,13 @@ function TriggersTab({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="card">
-        <h3 className="text-lg font-semibold mb-4">⚙️ Cronトリガー設定</h3>
-        <p className="text-sm text-[var(--text-muted)] mb-6">
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">Cronトリガー設定</h3>
+        <p className="text-sm text-gray-600 mb-6">
           各CronジョブのON/OFFを切り替えます。無効化されたCronは実行されません。
         </p>
-        <div className="space-y-4">
+        <div className="space-y-3">
           {Object.entries(cronNames).map(([key, info]) => {
             const config = cronConfig[key];
             if (!config) return null;
@@ -620,21 +684,17 @@ function TriggersTab({
             return (
               <div
                 key={key}
-                className="flex items-center justify-between p-4 border border-[var(--border-color)] rounded-lg"
+                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <h4 className="font-semibold">{info.label}</h4>
-                    <span
-                      className={`badge ${config.enabled ? "badge-success" : "badge-error"}`}
-                    >
+                  <div className="flex items-center gap-3 mb-2">
+                    <h4 className="font-semibold text-gray-900">{info.label}</h4>
+                    <span className={`badge ${config.enabled ? "badge-success" : "badge-danger"}`}>
                       {config.enabled ? "ON" : "OFF"}
                     </span>
                   </div>
-                  <p className="text-sm text-[var(--text-muted)] mb-2">
-                    {info.description}
-                  </p>
-                  <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
+                  <p className="text-sm text-gray-600 mb-2">{info.description}</p>
+                  <div className="flex items-center gap-4 text-xs text-gray-500">
                     <span>📅 {info.schedule}</span>
                     {config.lastRun && (
                       <span>🕒 最終実行: {new Date(config.lastRun).toLocaleString("ja-JP")}</span>
@@ -643,11 +703,7 @@ function TriggersTab({
                 </div>
                 <button
                   onClick={() => onToggle(key, !config.enabled)}
-                  className={`px-6 py-2 rounded font-medium transition-colors ${
-                    config.enabled
-                      ? "bg-[var(--accent-red)] hover:bg-opacity-80"
-                      : "bg-[var(--accent-green)] hover:bg-opacity-80"
-                  }`}
+                  className={`btn ${config.enabled ? "btn-danger" : "btn-success"}`}
                 >
                   {config.enabled ? "無効化" : "有効化"}
                 </button>
