@@ -151,6 +151,17 @@ body {
   background: #157347;
 }
 
+.btn-disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-disabled:hover {
+  background: var(--bg-tertiary);
+}
+
 /* Badge styles */
 .badge {
   display: inline-flex;

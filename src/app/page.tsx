@@ -979,6 +979,13 @@ function TriggersTab({
     description: string;
     schedule: string;
   }> | null>(null);
+  const [triggering, setTriggering] = useState<Record<string, boolean>>({});
+  const [triggerResults, setTriggerResults] = useState<Record<string, {
+    success: boolean;
+    message: string;
+    duration?: number;
+    timestamp: string;
+  }>>({});
 
   const fetchNextExecutions = async () => {
     try {
@@ -997,6 +1004,57 @@ function TriggersTab({
     const interval = setInterval(fetchNextExecutions, 60000); // Update every minute
     return () => clearInterval(interval);
   }, []);
+
+  const handleManualTrigger = async (cronName: string) => {
+    if (!confirm(`「${cronName}」を今すぐ実行しますか？`)) return;
+
+    setTriggering((prev) => ({ ...prev, [cronName]: true }));
+    setTriggerResults((prev) => {
+      const newResults = { ...prev };
+      delete newResults[cronName];
+      return newResults;
+    });
+
+    try {
+      const res = await fetch("/api/cron/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cronName }),
+      });
+
+      const data = await res.json();
+
+      setTriggerResults((prev) => ({
+        ...prev,
+        [cronName]: {
+          success: data.success || false,
+          message: data.success
+            ? `実行成功 (${data.duration}ms)`
+            : data.error || "実行に失敗しました",
+          duration: data.duration,
+          timestamp: new Date().toISOString(),
+        },
+      }));
+
+      // Refresh cron config to update lastRun
+      if (data.success) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      }
+    } catch (error) {
+      setTriggerResults((prev) => ({
+        ...prev,
+        [cronName]: {
+          success: false,
+          message: error instanceof Error ? error.message : "実行エラー",
+          timestamp: new Date().toISOString(),
+        },
+      }));
+    } finally {
+      setTriggering((prev) => ({ ...prev, [cronName]: false }));
+    }
+  };
 
   if (!cronConfig) {
     return (
@@ -1070,6 +1128,9 @@ function TriggersTab({
 
             const nextExec = nextExecutions?.[key];
 
+            const isTriggering = triggering[key];
+            const result = triggerResults[key];
+
             return (
               <div
                 key={key}
@@ -1081,6 +1142,14 @@ function TriggersTab({
                     <span className={`badge ${config.enabled ? "badge-success" : "badge-danger"}`}>
                       {config.enabled ? "ON" : "OFF"}
                     </span>
+                    {isTriggering && (
+                      <span className="badge badge-warning">実行中...</span>
+                    )}
+                    {result && (
+                      <span className={`badge ${result.success ? "badge-success" : "badge-danger"}`}>
+                        {result.success ? "✓ 成功" : "✗ 失敗"}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-600 mb-2">{info.description}</p>
                   <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
@@ -1099,13 +1168,36 @@ function TriggersTab({
                       </span>
                     )}
                   </div>
+                  {result && (
+                    <div className={`mt-2 text-xs px-3 py-2 rounded ${
+                      result.success
+                        ? "bg-green-50 text-green-700 border border-green-200"
+                        : "bg-red-50 text-red-700 border border-red-200"
+                    }`}>
+                      {result.message}
+                      {result.duration && ` (${result.duration}ms)`}
+                      <span className="text-gray-500 ml-2">
+                        {new Date(result.timestamp).toLocaleTimeString("ja-JP")}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => onToggle(key, !config.enabled)}
-                  className={`btn ${config.enabled ? "btn-danger" : "btn-success"}`}
-                >
-                  {config.enabled ? "無効化" : "有効化"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleManualTrigger(key)}
+                    disabled={isTriggering}
+                    className={`btn ${isTriggering ? "btn-disabled" : "btn-primary"}`}
+                    title="今すぐ実行"
+                  >
+                    {isTriggering ? "実行中..." : "▶ 実行"}
+                  </button>
+                  <button
+                    onClick={() => onToggle(key, !config.enabled)}
+                    className={`btn ${config.enabled ? "btn-danger" : "btn-success"}`}
+                  >
+                    {config.enabled ? "無効化" : "有効化"}
+                  </button>
+                </div>
               </div>
             );
           })}
