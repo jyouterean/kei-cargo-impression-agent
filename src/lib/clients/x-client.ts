@@ -152,12 +152,14 @@ export class XClient {
       startTime?: string;
     } = {}
   ): Promise<SearchResponse> {
+    // NOTE:
+    // X API のエラー「One or more parameters to your request was invalid」は、
+    // プランによって利用できない tweet.fields / expansions / user.fields を指定している場合にも発生します。
+    // まずは最小限のパラメータだけで安定動作させるため、
+    // query / max_results / start_time のみに絞っています。
     const params = new URLSearchParams({
       query: `${query} lang:ja -is:retweet`,
-      "tweet.fields": "created_at,public_metrics,author_id",
-      "user.fields": "public_metrics",
-      expansions: "author_id",
-      max_results: (options.maxResults || 100).toString(),
+      max_results: (options.maxResults || 50).toString(),
     });
 
     if (options.sinceId) {
