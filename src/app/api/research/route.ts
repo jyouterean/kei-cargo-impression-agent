@@ -45,13 +45,15 @@ export async function GET(request: NextRequest) {
         where: eq(externalPosts.id, pattern.externalPostId),
       });
 
-      if (post) {
+      if (post && post.buzzScore !== null && post.buzzScore !== undefined) {
+        const buzzScore = post.buzzScore;
+        
         if (pattern.format) {
           if (!patternStats.formats[pattern.format]) {
             patternStats.formats[pattern.format] = { count: 0, avgBuzz: 0 };
           }
           patternStats.formats[pattern.format].count++;
-          patternStats.formats[pattern.format].avgBuzz += post.buzzScore;
+          patternStats.formats[pattern.format].avgBuzz += buzzScore;
         }
 
         if (pattern.hookType) {
@@ -59,7 +61,7 @@ export async function GET(request: NextRequest) {
             patternStats.hookTypes[pattern.hookType] = { count: 0, avgBuzz: 0 };
           }
           patternStats.hookTypes[pattern.hookType].count++;
-          patternStats.hookTypes[pattern.hookType].avgBuzz += post.buzzScore;
+          patternStats.hookTypes[pattern.hookType].avgBuzz += buzzScore;
         }
 
         if (pattern.payloadType) {
@@ -67,7 +69,7 @@ export async function GET(request: NextRequest) {
             patternStats.payloadTypes[pattern.payloadType] = { count: 0, avgBuzz: 0 };
           }
           patternStats.payloadTypes[pattern.payloadType].count++;
-          patternStats.payloadTypes[pattern.payloadType].avgBuzz += post.buzzScore;
+          patternStats.payloadTypes[pattern.payloadType].avgBuzz += buzzScore;
         }
       }
     }
