@@ -60,6 +60,17 @@ export async function minePatterns(): Promise<{
 
   const unmined = postsToMine.filter((p) => !minedIds.has(p.id));
 
+  if (unmined.length === 0) {
+    console.log("[PatternMiner] No posts to mine (either no external posts or all already mined)");
+    await db.insert(systemEvents).values({
+      eventType: "pattern_mine_complete",
+      severity: "info",
+      message: `Pattern mining skipped: no new posts to mine`,
+      metadata: { ...results, reason: "No unmined posts available" },
+    });
+    return results;
+  }
+
   for (const post of unmined) {
     results.processed++;
 
