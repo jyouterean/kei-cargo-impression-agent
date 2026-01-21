@@ -159,6 +159,27 @@ export async function selectArm(
   const hour = now.getHours();
   const timeBucket = getTimeBucket(hour);
 
+  // Optimize: Instead of trying all combinations, use weighted sampling
+  // Step 1: Get top formats and hooks based on weights
+  const formatScores = formats.map(f => ({
+    format: f,
+    weight: weights.formats[f] || 1.0,
+  })).sort((a, b) => b.weight - a.weight);
+
+  const hookScores = hooks.map(h => ({
+    hookType: h,
+    weight: weights.hookTypes[h] || 1.0,
+  })).sort((a, b) => b.weight - a.weight);
+
+  // Step 2: Try top N combinations instead of all (optimization)
+  const topFormats = formatScores.slice(0, Math.min(5, formats.length));
+  const topHooks = hookScores.slice(0, Math.min(5, hooks.length));
+  
+  // Step 3: Pre-sample topics (random selection for diversity)
+  const sampledTopics = [...topics] // Create a copy to avoid mutating readonly array
+    .sort(() => Math.random() - 0.5) // Randomize
+    .slice(0, Math.min(10, topics.length)); // Top 10 for efficiency
+
   let bestScore = -Infinity;
   let bestChoice = {
     format: formats[0],
@@ -167,37 +188,50 @@ export async function selectArm(
     armId: "",
   };
 
-  // Sample each combination
-  for (const format of formats) {
-    for (const hookType of hooks) {
-      for (const topic of topics) {
-        const arm: Partial<Arm> = {
-          platform,
-          format,
-          hookType,
-          topic,
-          timeBucket,
-          dayOfWeek,
-        };
-
-        const armId = getArmId(arm);
-        const stats = await getArmStats(armId, platform);
-
-        // Apply external learning priors
-        const formatWeight = weights.formats[format] || 1.0;
-        const hookWeight = weights.hookTypes[hookType] || 1.0;
-
-        // Adjust alpha based on external weights
-        const adjustedAlpha = stats.alpha * formatWeight * hookWeight;
-
-        // Thompson Sampling
-        const sample = sampleBeta(adjustedAlpha, stats.beta);
-
-        if (sample > bestScore) {
-          bestScore = sample;
-          bestChoice = { format, hookType, topic, armId };
-        }
+  // Sample from top combinations (reduced from 735 to ~250 max)
+  const candidates: Array<{ format: string; hookType: string; topic: string }> = [];
+  
+  for (const { format } of topFormats) {
+    for (const { hookType } of topHooks) {
+      for (const topic of sampledTopics) {
+        candidates.push({ format, hookType, topic });
       }
+    }
+  }
+
+  // Shuffle for exploration
+  candidates.sort(() => Math.random() - 0.5);
+
+  // Evaluate candidates (limit to reasonable number)
+  const maxCandidates = Math.min(100, candidates.length);
+  for (let i = 0; i < maxCandidates; i++) {
+    const { format, hookType, topic } = candidates[i];
+    
+    const arm: Partial<Arm> = {
+      platform,
+      format,
+      hookType,
+      topic,
+      timeBucket,
+      dayOfWeek,
+    };
+
+    const armId = getArmId(arm);
+    const stats = await getArmStats(armId, platform);
+
+    // Apply external learning priors
+    const formatWeight = weights.formats[format] || 1.0;
+    const hookWeight = weights.hookTypes[hookType] || 1.0;
+
+    // Adjust alpha based on external weights
+    const adjustedAlpha = stats.alpha * formatWeight * hookWeight;
+
+    // Thompson Sampling
+    const sample = sampleBeta(adjustedAlpha, stats.beta);
+
+    if (sample > bestScore) {
+      bestScore = sample;
+      bestChoice = { format, hookType, topic, armId };
     }
   }
 

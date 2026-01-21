@@ -48,6 +48,73 @@ export async function synthesizeTemplates(): Promise<{
   // Get pattern distribution from last 7 days
   const distribution = await getPatternDistribution(7);
 
+  // Check if we have any patterns
+  const hasPatterns = 
+    Object.keys(distribution.formats).length > 0 ||
+    Object.keys(distribution.hookTypes).length > 0 ||
+    Object.keys(distribution.payloadTypes).length > 0;
+
+  if (!hasPatterns) {
+    // No patterns available - initialize with default weights (1.0) for all platforms and formats
+    console.log("[TemplateSynthesizer] No patterns found, initializing default weights");
+    
+    // Explicitly initialize default weights (1.0) for all platforms and formats
+    for (const platform of ["x", "threads"] as const) {
+      // Format weights
+      for (const format of config.formats) {
+        await upsertWeight({
+          weekStart,
+          platform,
+          format,
+          hookType: null,
+          payloadType: null,
+          weight: 1.0, // Default weight
+          sampleCount: 0,
+          avgBuzzScore: 0,
+        });
+        results.created++;
+      }
+
+      // Hook type weights
+      for (const hookType of config.hookTypes) {
+        await upsertWeight({
+          weekStart,
+          platform,
+          format: null,
+          hookType,
+          payloadType: null,
+          weight: 1.0, // Default weight
+          sampleCount: 0,
+          avgBuzzScore: 0,
+        });
+        results.created++;
+      }
+
+      // Payload type weights
+      for (const payloadType of config.payloadTypes) {
+        await upsertWeight({
+          weekStart,
+          platform,
+          format: null,
+          hookType: null,
+          payloadType,
+          weight: 1.0, // Default weight
+          sampleCount: 0,
+          avgBuzzScore: 0,
+        });
+        results.created++;
+      }
+    }
+    
+    await db.insert(systemEvents).values({
+      eventType: "template_synthesize_complete",
+      severity: "info",
+      message: `Template synthesis completed: ${results.created} default weights initialized (no patterns available)`,
+      metadata: { ...results, reason: "No patterns available, using defaults" },
+    });
+    return results;
+  }
+
   // Calculate max values for normalization
   const maxFormatBuzz = Math.max(...Object.values(distribution.formats).map((f) => f.avgBuzz), 0.01);
   const maxHookBuzz = Math.max(...Object.values(distribution.hookTypes).map((h) => h.avgBuzz), 0.01);
@@ -56,12 +123,13 @@ export async function synthesizeTemplates(): Promise<{
     0.01
   );
 
-  // Update weights for each platform
+  // Update weights for each platform (even if distribution is empty, defaults will be used)
   for (const platform of ["x", "threads"] as const) {
     // Format weights
     for (const format of config.formats) {
       const data = distribution.formats[format] || { count: 0, avgBuzz: 0 };
-      const weight = calculateWeight(data.avgBuzz, data.count, maxFormatBuzz);
+      // If no data, use default weight (1.0)
+      const weight = data.count === 0 ? 1.0 : calculateWeight(data.avgBuzz, data.count, maxFormatBuzz);
 
       await upsertWeight({
         weekStart,
@@ -79,7 +147,8 @@ export async function synthesizeTemplates(): Promise<{
     // Hook type weights
     for (const hookType of config.hookTypes) {
       const data = distribution.hookTypes[hookType] || { count: 0, avgBuzz: 0 };
-      const weight = calculateWeight(data.avgBuzz, data.count, maxHookBuzz);
+      // If no data, use default weight (1.0)
+      const weight = data.count === 0 ? 1.0 : calculateWeight(data.avgBuzz, data.count, maxHookBuzz);
 
       await upsertWeight({
         weekStart,
@@ -97,7 +166,8 @@ export async function synthesizeTemplates(): Promise<{
     // Payload type weights
     for (const payloadType of config.payloadTypes) {
       const data = distribution.payloadTypes[payloadType] || { count: 0, avgBuzz: 0 };
-      const weight = calculateWeight(data.avgBuzz, data.count, maxPayloadBuzz);
+      // If no data, use default weight (1.0)
+      const weight = data.count === 0 ? 1.0 : calculateWeight(data.avgBuzz, data.count, maxPayloadBuzz);
 
       await upsertWeight({
         weekStart,

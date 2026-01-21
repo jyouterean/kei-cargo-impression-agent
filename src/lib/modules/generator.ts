@@ -125,65 +125,109 @@ export async function generateAndSchedule(
   let nextSlot = await getNextScheduleSlot(platform);
 
   for (let i = 0; i < count; i++) {
-    try {
-      // Log progress
-      await db.insert(systemEvents).values({
-        eventType: "generate_progress",
-        severity: "info",
-        message: `Generating post ${i + 1}/${count} for ${platform}`,
-        metadata: { platform, index: i + 1, total: count },
-      });
+    let retryCount = 0;
+    const maxRetries = 2;
+    let success = false;
 
-      const result = await generateDraft(platform);
+    while (retryCount <= maxRetries && !success) {
+      try {
+        // Log progress
+        if (retryCount === 0) {
+          await db.insert(systemEvents).values({
+            eventType: "generate_progress",
+            severity: "info",
+            message: `Generating post ${i + 1}/${count} for ${platform}`,
+            metadata: { platform, index: i + 1, total: count },
+          });
+        } else {
+          await db.insert(systemEvents).values({
+            eventType: "generate_retry",
+            severity: "info",
+            message: `Retrying post ${i + 1}/${count} (attempt ${retryCount + 1})`,
+            metadata: { platform, index: i + 1, retryCount },
+          });
+        }
 
-      if (!result.success || !result.post) {
-        results.failed++;
-        if (result.error) results.errors.push(result.error);
-        // Log failure
-        await db.insert(systemEvents).values({
-          eventType: "generate_draft_failed",
-          severity: "warn",
-          message: `Failed to generate draft ${i + 1}/${count}: ${result.error}`,
-          metadata: { platform, index: i + 1, error: result.error },
+        const result = await generateDraft(platform);
+
+        if (!result.success || !result.post) {
+          if (retryCount < maxRetries) {
+            retryCount++;
+            // Wait before retry (exponential backoff)
+            await new Promise((resolve) => setTimeout(resolve, 1000 * retryCount));
+            continue;
+          }
+          
+          results.failed++;
+          if (result.error) results.errors.push(result.error);
+          // Log failure
+          await db.insert(systemEvents).values({
+            eventType: "generate_draft_failed",
+            severity: "warn",
+            message: `Failed to generate draft ${i + 1}/${count} after ${retryCount + 1} attempts: ${result.error}`,
+            metadata: { platform, index: i + 1, error: result.error, retryCount },
+          });
+          break; // Exit retry loop
+        }
+
+        const { contentHash, minhashSignature } = prepareContentForStorage(result.post.content);
+
+        // Schedule the post
+        await db.insert(scheduledPosts).values({
+          platform,
+          content: result.post.content,
+          scheduledFor: nextSlot,
+          armId: result.post.armId,
+          format: result.post.format,
+          hookType: result.post.hookType,
+          topic: result.post.topic,
+          status: "pending",
+          contentHash,
         });
-        continue;
+
+        results.scheduled++;
+        success = true;
+
+        // Move to next slot
+        nextSlot = addMinutes(nextSlot, config.minGapMinutes + Math.floor(Math.random() * 30));
+        
+        // Log success
+        await db.insert(systemEvents).values({
+          eventType: "generate_post_success",
+          severity: "info",
+          message: `Successfully generated and scheduled post ${i + 1}/${count} for ${platform}`,
+          metadata: { 
+            platform, 
+            index: i + 1, 
+            armId: result.post.armId,
+            scheduledFor: nextSlot.toISOString(),
+          },
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        if (retryCount < maxRetries) {
+          retryCount++;
+          await new Promise((resolve) => setTimeout(resolve, 1000 * retryCount));
+          continue;
+        }
+        
+        results.failed++;
+        results.errors.push(`Post ${i + 1}: ${errorMessage}`);
+        
+        // Log error
+        await db.insert(systemEvents).values({
+          eventType: "generate_error",
+          severity: "error",
+          message: `Error generating post ${i + 1}/${count}: ${errorMessage}`,
+          metadata: { platform, index: i + 1, error: errorMessage, retryCount },
+        });
+        break; // Exit retry loop
       }
-
-      const { contentHash, minhashSignature } = prepareContentForStorage(result.post.content);
-
-      // Schedule the post
-      await db.insert(scheduledPosts).values({
-        platform,
-        content: result.post.content,
-        scheduledFor: nextSlot,
-        armId: result.post.armId,
-        format: result.post.format,
-        hookType: result.post.hookType,
-        topic: result.post.topic,
-        status: "pending",
-        contentHash,
-      });
-
-      results.scheduled++;
-
-      // Move to next slot
-      nextSlot = addMinutes(nextSlot, config.minGapMinutes + Math.floor(Math.random() * 30));
-
-      // Delay between generations (reduced from 1000ms to 500ms)
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      results.failed++;
-      results.errors.push(`Post ${i + 1}: ${errorMessage}`);
-      
-      // Log error
-      await db.insert(systemEvents).values({
-        eventType: "generate_error",
-        severity: "error",
-        message: `Error generating post ${i + 1}/${count}: ${errorMessage}`,
-        metadata: { platform, index: i + 1, error: errorMessage },
-      });
     }
+
+    // Delay between generations (reduced from 1000ms to 500ms)
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   // Log
