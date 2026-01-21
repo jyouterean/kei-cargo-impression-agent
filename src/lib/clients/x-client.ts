@@ -197,11 +197,24 @@ export class XClient {
           return data;
         }
 
-        // If Bearer fails with 401, try OAuth 1.0a
+        // Handle specific error codes
         if (response.status === 401) {
           const errorText = await response.text();
           console.error(`[X searchRecentTweets] Bearer token failed (401) for query "${query}":`, errorText.slice(0, 200));
           // Fall through to OAuth 1.0a
+        } else if (response.status === 402) {
+          // Payment Required - API plan doesn't support search
+          const errorText = await response.text();
+          let errorMessage = errorText;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.detail || errorJson.title || errorJson.errors?.[0]?.message || errorText;
+          } catch {
+            // Keep original error text
+          }
+          const fullMessage = `X API検索機能は現在のプランでは利用できません (402: Payment Required)。X Developer Portalでプランを確認してください。エラー詳細: ${errorMessage.slice(0, 200)}`;
+          console.error(`[X searchRecentTweets] ${fullMessage}`);
+          throw new Error(fullMessage);
         } else {
           const errorText = await response.text();
           let errorMessage = errorText;
@@ -267,6 +280,10 @@ export class XClient {
         
         if (response.status === 401) {
           throw new Error(`X API認証エラー (401): ${errorMessage}。Bearer TokenまたはOAuth 1.0a認証情報を確認してください。X Developer Portalでアプリの権限を確認し、Bearer Tokenを再生成してください。`);
+        } else if (response.status === 402) {
+          // Payment Required - API plan doesn't support search
+          const fullMessage = `X API検索機能は現在のプランでは利用できません (402: Payment Required)。X Developer Portalでプランを確認してください。エラー詳細: ${errorMessage.slice(0, 200)}`;
+          throw new Error(fullMessage);
         }
         
         throw new Error(`X API search error (${response.status}): ${errorMessage}`);

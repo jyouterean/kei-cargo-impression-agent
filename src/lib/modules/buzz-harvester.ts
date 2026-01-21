@@ -198,11 +198,22 @@ export async function harvestBuzzTweets(): Promise<{
       await new Promise((resolve) => setTimeout(resolve, 300)); // Reduced from 1000ms to 300ms
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const shortMessage = errorMessage.length > 100 ? errorMessage.slice(0, 100) + "..." : errorMessage;
+      const shortMessage = errorMessage.length > 200 ? errorMessage.slice(0, 200) + "..." : errorMessage;
       results.errors.push(`Query "${query}": ${shortMessage}`);
       
       // Log error to console only (DB insert is too slow, we'll batch log errors at the end)
       console.error(`[BuzzHarvester] Error for query "${query}":`, error);
+      
+      // If 402 error (Payment Required), stop processing other queries as they will all fail
+      if (errorMessage.includes("402") || errorMessage.includes("Payment Required")) {
+        console.error(`[BuzzHarvester] 402エラー検出: X APIの検索機能が利用できません。残りのクエリをスキップします。`);
+        // Add a note about skipping remaining queries
+        const remainingQueries = config.buzzHarvestQueries.slice(config.buzzHarvestQueries.indexOf(query) + 1);
+        if (remainingQueries.length > 0) {
+          results.errors.push(`[注意] 402エラーのため、残り${remainingQueries.length}個のクエリをスキップしました。`);
+        }
+        break; // Exit the loop early
+      }
     }
   }
 
