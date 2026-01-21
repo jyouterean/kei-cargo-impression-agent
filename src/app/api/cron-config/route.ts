@@ -16,7 +16,7 @@ export async function GET() {
     });
 
     const defaultConfig = {
-      buzz_harvest_x: { enabled: true, lastRun: null as string | null },
+      buzz_harvest_x: { enabled: false, lastRun: null as string | null }, // デフォルトで無効化（コスト削減）
       pattern_mine: { enabled: true, lastRun: null as string | null },
       generate: { enabled: true, lastRun: null as string | null },
       schedule: { enabled: true, lastRun: null as string | null },
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     });
 
     const defaultConfig = {
-      buzz_harvest_x: { enabled: true, lastRun: null as string | null },
+      buzz_harvest_x: { enabled: false, lastRun: null as string | null }, // デフォルトで無効化（コスト削減）
       pattern_mine: { enabled: true, lastRun: null as string | null },
       generate: { enabled: true, lastRun: null as string | null },
       schedule: { enabled: true, lastRun: null as string | null },
