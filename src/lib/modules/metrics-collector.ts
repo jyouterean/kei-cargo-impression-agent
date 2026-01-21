@@ -167,13 +167,22 @@ export async function collectMetrics(): Promise<{
     results[hoursWindow] = windowResult;
   }
 
-  // Log results
-  await db.insert(systemEvents).values({
-    eventType: "metrics_collection_complete",
-    severity: "info",
-    message: `Metrics collected: ${total.collected} successful, ${total.skipped} skipped`,
-    metadata: { windows: results, total },
-  });
+  // Log results (even if no posts were found)
+  if (total.collected === 0 && total.skipped === 0 && total.errors.length === 0) {
+    await db.insert(systemEvents).values({
+      eventType: "metrics_collection_complete",
+      severity: "info",
+      message: `Metrics collection completed: no posts needing collection`,
+      metadata: { windows: results, total },
+    });
+  } else {
+    await db.insert(systemEvents).values({
+      eventType: "metrics_collection_complete",
+      severity: "info",
+      message: `Metrics collected: ${total.collected} successful, ${total.skipped} skipped`,
+      metadata: { windows: results, total },
+    });
+  }
 
   return { windows: results, total };
 }

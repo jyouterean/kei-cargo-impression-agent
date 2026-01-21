@@ -34,11 +34,12 @@ export interface GeneratedPost {
 // Extract structural patterns from a viral tweet (PatternMiner)
 export async function extractPattern(tweetText: string): Promise<PatternExtractionResult> {
   const openai = getOpenAI();
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0.3,
-    response_format: { type: "json_object" },
-    messages: [
+  const response = await Promise.race([
+    openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.3,
+      response_format: { type: "json_object" },
+      messages: [
       {
         role: "system",
         content: `あなたはSNS投稿の構造分析の専門家です。軽貨物・配送業界のバズ投稿を分析し、その「構造パターン」を抽出してください。
@@ -63,7 +64,11 @@ export async function extractPattern(tweetText: string): Promise<PatternExtracti
         content: `以下の投稿の構造パターンを分析してください:\n\n${tweetText}`,
       },
     ],
-  });
+    }),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("OpenAI API timeout (60s)")), 60000);
+    }),
+  ]);
 
   const content = response.choices[0]?.message?.content || "{}";
   return JSON.parse(content) as PatternExtractionResult;
@@ -81,10 +86,11 @@ export async function generatePost(params: {
   const platformName = params.platform === "x" ? "X（Twitter）" : "Threads";
 
   const openai = getOpenAI();
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0.8,
-    messages: [
+  const response = await Promise.race([
+    openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.8,
+      messages: [
       {
         role: "system",
         content: `あなたは軽貨物・配送業界に詳しいSNSマーケターです。${platformName}向けの投稿を作成してください。
@@ -120,7 +126,11 @@ ${params.recentPosts.slice(0, 5).join("\n---\n")}
 投稿本文のみを出力してください（説明不要）。`,
       },
     ],
-  });
+    }),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("OpenAI API timeout (60s)")), 60000);
+    }),
+  ]);
 
   const content = response.choices[0]?.message?.content || "";
 
@@ -139,14 +149,15 @@ export async function checkContentSafety(content: string): Promise<{
   issues: string[];
 }> {
   const openai = getOpenAI();
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `あなたはSNS投稿の安全性チェッカーです。以下の観点で投稿を評価してください:
+  const response = await Promise.race([
+    openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `あなたはSNS投稿の安全性チェッカーです。以下の観点で投稿を評価してください:
 
 1. スパム性: 過度な宣伝、意味のない繰り返し、クリックベイト
 2. 煽りスコア: 過度な感情的煽り、炎上目的の表現
@@ -158,16 +169,20 @@ JSON形式で回答:
   "ragebaitScore": 0.0-1.0 (0=問題なし, 1=完全に煽り),
   "issues": ["問題点1", "問題点2", ...]
 }`,
-      },
-      {
-        role: "user",
-        content: content,
-      },
-    ],
-  });
+        },
+        {
+          role: "user",
+          content: content,
+        },
+      ],
+    }),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("OpenAI API timeout (60s)")), 60000);
+    }),
+  ]);
 
   const result = response.choices[0]?.message?.content || "{}";
-  return JSON.parse(result);
+  return JSON.parse(result) as { isSpam: boolean; ragebaitScore: number; issues: string[] };
 }
 
 export { getOpenAI as openai };

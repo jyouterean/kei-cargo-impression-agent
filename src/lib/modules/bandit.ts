@@ -329,13 +329,22 @@ export async function runLearningUpdate(): Promise<{
     results.updated++;
   }
 
-  // Log
-  await db.insert(systemEvents).values({
-    eventType: "learning_update_complete",
-    severity: "info",
-    message: `Learning update completed: ${results.updated} arms updated`,
-    metadata: results,
-  });
+  // Log (even if no posts were updated)
+  if (results.updated === 0 && results.skipped === 0) {
+    await db.insert(systemEvents).values({
+      eventType: "learning_update_complete",
+      severity: "info",
+      message: `Learning update completed: no posts with metrics found`,
+      metadata: results,
+    });
+  } else {
+    await db.insert(systemEvents).values({
+      eventType: "learning_update_complete",
+      severity: "info",
+      message: `Learning update completed: ${results.updated} arms updated`,
+      metadata: results,
+    });
+  }
 
   return results;
 }
